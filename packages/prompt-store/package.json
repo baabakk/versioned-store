@@ -1,0 +1,51 @@
+{
+  "name": "@versioned-store/prompt-store",
+  "version": "0.1.0",
+  "description": "A batteries-included, versioned prompt store with a deterministic promote-gate (golden-render + placeholder-binding), built on @versioned-store/core. Version, eval-gate, and roll back your LLM prompts.",
+  "type": "module",
+  "author": "Babak",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "engines": {
+    "node": ">=18"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "prompt",
+    "prompt-store",
+    "prompt-versioning",
+    "prompt-management",
+    "llm",
+    "llm-ops",
+    "eval-gate",
+    "versioned-config"
+  ],
+  "dependencies": {
+    "@versioned-store/core": "^0.1.0"
+  },
+  "peerDependencies": {
+    "zod": "^3.23.0 || ^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "zod": "^3.23.8"
+  }
+}

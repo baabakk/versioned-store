@@ -1,0 +1,15 @@
+{
+  "name": "versioned-store",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Monorepo for @versioned-store/* — the embedded-first versioned config primitive and its domain packages.",
+  "type": "module",
+  "workspaces": [
+    "packages/core",
+    "packages/prompt-store"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  }
+}
