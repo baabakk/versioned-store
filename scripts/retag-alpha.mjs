@@ -53,12 +53,27 @@ for (const { name, version } of publishablePackages()) {
     continue;
   }
 
-  // `latest` pointing at a prerelease is the failure that actually reaches users.
+  // `latest` pointing at a prerelease is only a problem once a STABLE version exists for it to track.
+  // For an alpha-only package there is no stable release yet, so latest = the alpha is the only sensible
+  // value (it is what makes a bare `npm install ${name}` resolve at all). Only flag a genuine regression:
+  // latest sitting on a prerelease while a stable version is available.
   if (tags.latest && isPrerelease(tags.latest)) {
-    console.error(`! ${name}: dist-tag "latest" points at the prerelease ${tags.latest}.`);
-    console.error(`  Every plain "npm install ${name}" now serves an alpha. Repoint latest at the newest`);
-    console.error(`  stable, or unpublish the tag: npm dist-tag add ${name}@<stable> latest`);
-    drift++;
+    let versions = [];
+    try {
+      const raw = JSON.parse(npm(["view", name, "versions", "--json"]));
+      versions = Array.isArray(raw) ? raw : [raw].filter(Boolean);
+    } catch {
+      // ignore; treated as no-known-stable below
+    }
+    const hasStable = versions.some((v) => !isPrerelease(v));
+    if (hasStable) {
+      console.error(`! ${name}: dist-tag "latest" points at the prerelease ${tags.latest}, but a stable version exists.`);
+      console.error(`  Every plain "npm install ${name}" now serves an alpha. Repoint latest at the stable:`);
+      console.error(`  npm dist-tag add ${name}@<stable> latest`);
+      drift++;
+    } else {
+      console.log(`- ${name}: latest -> ${tags.latest} (a prerelease, but no stable version exists yet; expected pre-1.0)`);
+    }
   }
 
   if (tags.alpha === version) {
