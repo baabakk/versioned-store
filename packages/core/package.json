@@ -8,6 +8,13 @@
   "publishConfig": {
     "access": "public"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/baabakk/versioned-store.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/baabakk/versioned-store/tree/main/packages/core#readme",
+  "bugs": "https://github.com/baabakk/versioned-store/issues",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "engines": {

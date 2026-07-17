@@ -8,7 +8,10 @@
 
 **Please do not open a public issue for a security vulnerability.**
 
-Report privately through GitHub's private vulnerability reporting: go to the repository's **Security** tab and choose **Report a vulnerability**. This opens a private advisory visible only to the maintainers.
+Report privately by either route:
+
+- Email **security@versioned-store.dev**, or
+- Use GitHub's private vulnerability reporting: go to the repository's **Security** tab and choose **Report a vulnerability**. This opens a private advisory visible only to the maintainers.
 
 Please include:
 
