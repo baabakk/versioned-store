@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { z } from "zod";
-import { createInMemoryBackend } from "@versioned-store/core";
-import { createPromptStore } from "./index.js";
+import { createInMemoryBackend, VersionedStoreError } from "@versioned-store/core";
+import { PromptNotFoundError, PromptRenderError, createPromptStore } from "./index.js";
 
 function makeStore() {
   return createPromptStore({
@@ -46,5 +46,27 @@ describe("@versioned-store/prompt-store", () => {
     const s = makeStore();
     const pin = await s.resolvePin("greeting"); // "Hello, {{name}}!"
     assert.throws(() => s.renderPinned(pin, {}), /invalid vars|unbound placeholder/);
+  });
+});
+
+describe("error taxonomy", () => {
+  // A consumer catches the library with one `catch (e instanceof VersionedStoreError)`. That only works if
+  // the domain packages throw into the core's taxonomy too, so these are not bare Errors.
+  test("render and not-found errors extend the core's VersionedStoreError", async () => {
+    const store = makeStore();
+    const pin = await store.resolvePin("greeting");
+
+    assert.throws(() => store.renderPinned(pin, {}), (err: unknown) => {
+      assert.ok(err instanceof PromptRenderError, "expected a PromptRenderError");
+      assert.ok(err instanceof VersionedStoreError, "a blanket catch on the core's base must cover it");
+      assert.equal((err as PromptRenderError).key, "greeting");
+      return true;
+    });
+
+    await assert.rejects(() => store.resolvePin("no-such-key"), (err: unknown) => {
+      assert.ok(err instanceof PromptNotFoundError);
+      assert.ok(err instanceof VersionedStoreError);
+      return true;
+    });
   });
 });

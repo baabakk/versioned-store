@@ -10,11 +10,37 @@ import { z } from "zod";
 import {
   createVersionedStore,
   recordFallback,
+  VersionedStoreError,
   type KeySummary,
   type VersionedStore,
   type VersionedStoreBackend,
   type VersionInfo,
 } from "@versioned-store/core";
+
+// Errors extend the core's base so a consumer's blanket `catch (e instanceof VersionedStoreError)` covers
+// the whole library, domain packages included.
+
+/** A prompt could not be rendered: vars failed their schema, or a placeholder was left unbound. */
+export class PromptRenderError extends VersionedStoreError {
+  constructor(
+    message: string,
+    public readonly key: string,
+  ) {
+    super(message);
+    this.name = "PromptRenderError";
+  }
+}
+
+/** A prompt key resolved to nothing: no stored version and no code default to fall back to. */
+export class PromptNotFoundError extends VersionedStoreError {
+  constructor(
+    message: string,
+    public readonly key: string,
+  ) {
+    super(message);
+    this.name = "PromptNotFoundError";
+  }
+}
 
 /** The stored prompt payload: the template text plus optional bundled config. */
 export interface PromptPayload {
@@ -116,7 +142,7 @@ export function createPromptStore(opts: PromptStoreOptions): PromptStore {
       const parsed = schema.safeParse(vars);
       if (!parsed.success) {
         const where = parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
-        throw new Error(`[prompt-store] invalid vars for "${pin.key}" v${pin.version}: ${where}`);
+        throw new PromptRenderError(`[prompt-store] invalid vars for "${pin.key}" v${pin.version}: ${where}`, pin.key);
       }
     }
     let out = pin.text;
@@ -129,7 +155,7 @@ export function createPromptStore(opts: PromptStoreOptions): PromptStore {
     const leftover = /\{\{(\w[\w.-]*)\}\}/.exec(out);
     if (leftover) {
       recordFallback("prompt", pin.key, "unbound-placeholder", { extra: { placeholder: leftover[1], version: pin.version } });
-      throw new Error(`[prompt-store] unbound placeholder {{${leftover[1]}}} in "${pin.key}" v${pin.version}`);
+      throw new PromptRenderError(`[prompt-store] unbound placeholder {{${leftover[1]}}} in "${pin.key}" v${pin.version}`, pin.key);
     }
     return out;
   }
@@ -150,7 +176,7 @@ export function createPromptStore(opts: PromptStoreOptions): PromptStore {
 
   async function resolvePin(key: string, label = DEFAULT_LABEL): Promise<ResolvedPrompt> {
     const r = await core.resolve(key, label);
-    if (!r) throw new Error(`[prompt-store] no code default for key "${key}"`);
+    if (!r) throw new PromptNotFoundError(`[prompt-store] no code default for key "${key}"`, key);
     return { key: r.key, version: r.version, sha256: r.sha256, text: r.value.text, config: r.value.config };
   }
 
