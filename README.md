@@ -8,6 +8,9 @@ An embedded-first, storage-portable, immutable-versioned config primitive with a
 |---|---|
 | [`@versioned-store/core`](packages/core) | The generic primitive: immutable versions, a movable label pointer, a code-default fallback, and a promote-gate, over any payload `T`. Backends: SQLite (`node:sqlite`), File, InMemory, Postgres, Mongo, Redis. Plus migration, signed portable bundles, canary/shadow with gate-driven auto-rollback, a CLI, and an exported conformance suite. |
 | [`@versioned-store/prompt-store`](packages/prompt-store) | A batteries-included **prompt store** built on the core: strict `{{placeholder}}` rendering, Zod var-schema validation, unknown-placeholder detection, and a deterministic golden-render promote-gate. |
+| [`@versioned-store/scaffold-store`](packages/scaffold-store) | A batteries-included **scaffold store** built on the core: strict `{placeholder}` command rendering, injected key routing, and a deterministic promote-gate over pinning, placeholder binding, and an executable allowlist. |
+
+The two domain packages are worked examples of the same shape: payload, rendering, and a domain gate on top; policy and storage below. Neither adds a mechanism to the core.
 
 ## The pitch, and the honest gap
 
@@ -23,10 +26,13 @@ Conceded table stakes, openly: immutable versions of an arbitrary payload (AWS A
 
 ```bash
 npm install
-npm run build -w @versioned-store/core        # build core first (prompt-store resolves its dist)
-npm run build -w @versioned-store/prompt-store
-npm test --workspaces
+npm run build     # core builds first; the domain packages resolve its dist
+npm test
 ```
+
+Node 22+ is needed to run the suite (the SQLite backend uses the built-in `node:sqlite`). The published packages support Node 18+: every main entry is dependency-free, and anything needing a driver (`node:sqlite`, `pg`, `mongodb`, the CLI) is a subpath export. CI proves both halves, importing each main entry on real Node 18 and 20.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, the architecture rules, and how to add a changeset. [SECURITY.md](SECURITY.md) covers private disclosure and the trust boundaries.
 
 ## Certifying a backend
 

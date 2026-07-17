@@ -1,8 +1,10 @@
-# versioned-store
+# @versioned-store/core
 
-An embedded-first, storage-portable, immutable-versioned config primitive with an eval-gate coupled to promote. One small core (`createVersionedStore<T>`) sits over an eight-method backend contract, with SQLite as the zero-config default plus InMemory, File, Postgres, Redis, and Mongo adapters.
+An embedded-first, storage-portable, immutable-versioned config primitive with an **eval-gate coupled to promote**. One small core (`createVersionedStore<T>`) sits over an eight-method backend contract, with SQLite as the zero-config default plus InMemory, File, Postgres, Redis, and Mongo adapters.
 
-Author: Babak.
+```bash
+npm install @versioned-store/core
+```
 
 ## What it is
 
@@ -15,13 +17,13 @@ A production override layer for any payload `T`, not a version-control toy:
 - **Observability.** A versioned event schema (fallback, gate-outcome, promote-accepted, promote-refused) with a per-type counter.
 - **Domain-agnostic.** The payload `T` maps via `toDoc` / `fromDoc`; `hash`, `validate`, and the missing-policy are injected. The core has no `if (domain === ...)` branch.
 
-The defensible pairing is the runtime combination, not the immutable-versions or the movable-label (those are table stakes): the eval-gate coupled to promote so bad edits physically cannot go live, plus the code-default or offline fallback so the store is never a hard dependency, both over arbitrary `T`, embedded-first with SQLite by default. Lead with the pairing.
+The defensible thing is the runtime **pairing**, not any single piece. See [Honest positioning](#honest-positioning).
 
 ## Quickstart on SQLite (under five minutes)
 
 ```ts
-import { createVersionedStore } from "@babak/versioned-store";
-import { createSqliteBackend } from "@babak/versioned-store/backends/sqlite";
+import { createVersionedStore } from "@versioned-store/core";
+import { createSqliteBackend } from "@versioned-store/core/backends/sqlite";
 
 const store = createVersionedStore<{ text: string }>(
   {
@@ -39,16 +41,31 @@ await store.promote("hello", v1);
 const active = await store.resolve("hello"); // { version: 1, value: { text: "Hi there!" } }
 ```
 
-The backend is always injected: the store never constructs one, so it carries no backend-specific dependency. InMemory / File / Redis import from the main entry; SQLite / Postgres / Mongo import from a subpath (they reference a driver type).
+The backend is always injected: the store never constructs one, so it carries no backend-specific dependency.
+
+## Entry points
+
+The main entry is dependency-free and works on Node 18. Anything that needs a driver is a subpath, so importing the core never loads `node:sqlite`, `pg`, or `mongodb`:
+
+| Import | Requires |
+|---|---|
+| `@versioned-store/core` | nothing (Node 18+) |
+| `@versioned-store/core/backends/sqlite` | `node:sqlite` (Node 22+) |
+| `@versioned-store/core/backends/postgres` | `pg` |
+| `@versioned-store/core/backends/mongo` | `mongodb` |
+| `@versioned-store/core/conformance` | nothing |
+| `@versioned-store/core/cli` | `node:sqlite` (Node 22+) |
+
+InMemory, File, and Redis (an injected client) are driver-free and export from the main entry.
 
 ## Consuming the store: the rule of one construction site
 
-Wire the store ONCE at a composition root and export a typed façade. Every other file in your app imports from that façade, never from `@babak/versioned-store` directly:
+Wire the store ONCE at a composition root and export a typed façade. Every other file in your app imports from that façade, never from `@versioned-store/core` directly:
 
 ```ts
 // src/config/prompts.ts — the one construction site
-import { createVersionedStore, setStoreLogger } from "@babak/versioned-store";
-import { createPostgresBackend } from "@babak/versioned-store/backends/postgres";
+import { createVersionedStore, setStoreLogger } from "@versioned-store/core";
+import { createPostgresBackend } from "@versioned-store/core/backends/postgres";
 import { logger, pool } from "../infra.js";
 
 setStoreLogger(logger); // inject your pino-compatible logger once
@@ -65,14 +82,14 @@ This makes every future upgrade (additive or BREAKING) a one-file change on your
 
 | Backend | Factory | Notes |
 |---|---|---|
-| InMemory | `createInMemoryBackend()` | reference implementation; tests and Mongo-less runs |
+| InMemory | `createInMemoryBackend()` | reference implementation; tests and backend-less runs |
 | SQLite | `createSqliteBackend(path)` | built-in `node:sqlite` (Node 22+); subpath import |
 | File | `createFileBackend(dir)` | zero-dependency, durable; `wx`-flag immutability |
 | Postgres | `createPostgresBackend(pool)` | inject a `pg` Pool; subpath import |
 | Redis | `createRedisBackend(client, prefix)` | inject an ioredis-like client; atomic Lua insert |
 | Mongo | `createMongoBackend(getDb, vColl, lColl)` | inject a `() => Promise<Db>`; subpath import |
 
-Every backend passes the same conformance suite (`store.test.ts`): the immutability and compare-and-swap contract is identical across all of them.
+Every backend passes the same conformance suite: the immutability and compare-and-swap contract is identical across all of them.
 
 ## Eval-gate ladder (three tiers)
 
@@ -84,14 +101,22 @@ Every backend passes the same conformance suite (`store.test.ts`): the immutabil
 
 ## Portability and rollout
 
-- **Migration** (`migrate.ts`): a portable bundle moves between any two backends, verified by content hash.
-- **Sealed bundles** (`bundle.ts`): a single-object, content-addressed, optionally HMAC-signed export; tampering is detected on import.
-- **Canary and shadow** (`canary.ts`): weighted resolution plus gate-driven auto-rollback. A failing canary is demoted to the last-known-good and alarmed, embedded, with no hosted service.
-- **CLI** (`npm run store -- <verb> ...`): keys, versions, get, label, promote, rollback, export, import, migrate.
+- **Migration** (`migrate`): a portable bundle moves between any two backends, verified by content hash.
+- **Sealed bundles** (`bundle`): a single-object, content-addressed, optionally HMAC-signed export; tampering is detected on import.
+- **Canary and shadow** (`canary`): weighted resolution plus gate-driven auto-rollback. A failing canary is demoted to the last-known-good and alarmed, embedded, with no hosted service.
+- **CLI** (`npx versioned-store <verb> ...`): keys, versions, get, label, promote, rollback, export, import, migrate.
 
 ## Certifying a new backend
 
-Implement the `VersionedStoreBackend` contract (`backend.ts`, eight methods) and add your factory to the `BACKENDS` list in `store.test.ts`. If the conformance suite is green, the adapter is correct (immutability, CAS, ordering, labels).
+Implement the `VersionedStoreBackend` contract (`backend.ts`, eight methods), then run the same suite this repo runs against its own adapters:
+
+```ts
+import { runConformance } from "@versioned-store/core/conformance";
+
+runConformance("MyBackend", () => makeMyBackend());
+```
+
+If it is green, the adapter honours immutability, compare-and-swap, version ordering, and labels.
 
 ## Honest positioning
 
@@ -103,12 +128,8 @@ Several properties here are not novel, and the positioning concedes each:
 
 The claim is only the runtime bundle: the eval-gate coupled to promote so bad edits cannot go live, plus the code-default or offline fallback so the store is never a hard dependency, both over arbitrary `T`, embedded-first with SQLite by default. A reviewer should not be able to point to a single over-claim.
 
-## Publishing (owner-driven, not automated)
+## Domain packages
 
-This module currently lives inside the ADW application. Publishing it as a standalone package is a deliberate step for the maintainer, not something the build does:
+[`@versioned-store/prompt-store`](../prompt-store) and [`@versioned-store/scaffold-store`](../scaffold-store) are batteries-included domain stores built on this core. They are worked examples of the pattern: payload shape, rendering, and a domain gate on top; policy and storage below.
 
-1. Extract this directory into its own package or repository.
-2. Choose a license and an npm scope or name.
-3. Add the `exports` and `types` map plus a build.
-4. Export the conformance suite as a public entry point so third parties can certify their own adapters.
-5. Run `npm publish` with your credentials.
+MIT.

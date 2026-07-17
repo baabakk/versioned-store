@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # The suite exercises the SQLite backend, which needs node:sqlite (Node 22+), so the full run starts at 22.
+    # Node 18/20 support is a narrower promise and is proven by the `engines` job below, on those runtimes.
+    name: Test on Node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+  engines:
+    # `engines: {"node": ">=18"}` is a promise that `import "@versioned-store/core"` works on Node 18. It is
+    # only true while the barrel's import graph never reaches node:sqlite / pg / mongodb, which are subpath
+    # exports for exactly this reason. This job is the promise's only real proof: it broke once (index.ts
+    # re-exported the CLI, which imports the sqlite backend) and nothing caught it, because on the
+    # maintainer's Node 24 the only symptom was an experimental warning nobody reads.
+    name: Main entry loads on Node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [18, 20]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Import every package's main entry
+        run: |
+          set -e
+          for pkg in core prompt-store scaffold-store; do
+            echo "importing @versioned-store/$pkg on node $(node -v)"
+            node --input-type=module -e "
+              const m = await import('./packages/$pkg/dist/index.js');
+              if (Object.keys(m).length === 0) { throw new Error('$pkg exported nothing'); }
+              console.log('  ok: ' + Object.keys(m).length + ' exports');
+            "
+          done
+
+      - name: The driver subpaths must NOT load here (they are Node 22+ / driver-coupled by design)
+        run: |
+          # Asserts the split is real. If this ever SUCCEEDS on Node 18, node:sqlite is no longer the
+          # constraint we designed the subpath split around, and the split should be revisited.
+          if node --input-type=module -e "await import('./packages/core/dist/backends/sqlite.js')" 2>/dev/null; then
+            echo "Unexpected: the sqlite backend loaded on node $(node -v). Revisit the subpath rationale."
+            exit 1
+          fi
+          echo "confirmed: the sqlite backend is correctly unavailable on node $(node -v)"
+
+  publish-dry-run:
+    # Catches packaging faults that only appear at pack time: a files[] entry pointing at a path that does not
+    # exist (the core shipped with no README this way), a missing LICENSE, or an exports map naming a file the
+    # build never emitted. Cheap here; embarrassing on npm, where a bad publish cannot be taken back.
+    name: Publish dry-run
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Pack each package and assert its declared files exist
+        run: |
+          set -e
+          for pkg in core prompt-store scaffold-store; do
+            echo "--- @versioned-store/$pkg"
+            npm pack --dry-run -w @versioned-store/$pkg
+            node -e "
+              const fs = require('fs');
+              const p = './packages/$pkg';
+              const j = JSON.parse(fs.readFileSync(p + '/package.json', 'utf8'));
+              for (const f of j.files) {
+                if (f !== 'dist' && !fs.existsSync(p + '/' + f)) {
+                  throw new Error('$pkg: files[] lists \"' + f + '\" but it does not exist');
+                }
+              }
+              const entries = [j.main, j.types].filter(Boolean);
+              for (const e of entries) {
+                if (!fs.existsSync(p + '/' + e)) throw new Error('$pkg: entry ' + e + ' was not emitted');
+              }
+              console.log('  files[] and entry points verified');
+            "
+          done

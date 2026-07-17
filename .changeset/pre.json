@@ -1,0 +1,10 @@
+{
+  "mode": "pre",
+  "tag": "alpha",
+  "initialVersions": {
+    "@versioned-store/core": "0.0.0",
+    "@versioned-store/prompt-store": "0.0.0",
+    "@versioned-store/scaffold-store": "0.0.0"
+  },
+  "changesets": []
+}

@@ -2,14 +2,22 @@
   "name": "versioned-store",
   "version": "0.0.0",
   "private": true,
-  "description": "Monorepo for @versioned-store/* — the embedded-first versioned config primitive and its domain packages.",
+  "description": "Monorepo for @versioned-store/*: the embedded-first versioned config primitive and its domain packages.",
   "type": "module",
   "workspaces": [
     "packages/core",
-    "packages/prompt-store"
+    "packages/prompt-store",
+    "packages/scaffold-store"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "release:alpha": "npm run build && changeset publish && node scripts/retag-alpha.mjs",
+    "release:verify": "node scripts/retag-alpha.mjs --check"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.31.1"
   }
 }

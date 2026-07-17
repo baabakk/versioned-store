@@ -1,6 +1,6 @@
 {
   "name": "@versioned-store/core",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "Embedded-first, storage-portable, immutable-versioned config primitive with an eval-gate coupled to promote. Arbitrary payload T; SQLite/File/InMemory/Postgres/Mongo/Redis backends.",
   "type": "module",
   "author": "Babak",
@@ -21,6 +21,10 @@
     "./backends/sqlite": {
       "types": "./dist/backends/sqlite.d.ts",
       "import": "./dist/backends/sqlite.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
     },
     "./backends/mongo": {
       "types": "./dist/backends/mongo.d.ts",
@@ -51,9 +55,15 @@
     "ioredis": "*"
   },
   "peerDependenciesMeta": {
-    "mongodb": { "optional": true },
-    "pg": { "optional": true },
-    "ioredis": { "optional": true }
+    "mongodb": {
+      "optional": true
+    },
+    "pg": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
