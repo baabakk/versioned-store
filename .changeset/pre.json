@@ -6,5 +6,7 @@
     "@versioned-store/prompt-store": "0.0.0",
     "@versioned-store/scaffold-store": "0.0.0"
   },
-  "changesets": []
+  "changesets": [
+    "initial-alpha"
+  ]
 }
