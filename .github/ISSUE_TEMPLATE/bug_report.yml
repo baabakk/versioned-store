@@ -1,0 +1,58 @@
+name: Bug report
+description: Something in a published package behaves incorrectly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. For "should we do X" or a usage question, please open a
+        [Discussion](https://github.com/baabakk/versioned-store/discussions) instead; Issues are for confirmed defects.
+  - type: dropdown
+    id: package
+    attributes:
+      label: Which package
+      options:
+        - "@versioned-store/core"
+        - "@versioned-store/prompt-store"
+        - "@versioned-store/scaffold-store"
+        - not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      description: "Output of `npm ls @versioned-store/core` (or the relevant package)."
+      placeholder: "0.1.0-alpha.0"
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      description: "Output of `node -v`. The published main entry targets Node 18+."
+      placeholder: "v22.11.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend in use
+      options: [InMemory, SQLite, File, Postgres, Redis, Mongo, "not applicable"]
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what you expected
+      description: Include the exact error message if there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: The smallest snippet that shows the problem. A failing test against the conformance suite is ideal for a backend bug.
+      render: typescript
+    validations:
+      required: true

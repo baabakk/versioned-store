@@ -1,0 +1,13 @@
+# Steer non-bug traffic to Discussions, per the Discussion-vs-Issue split in CONTRIBUTING.md:
+# Discussion for "should we do X"; Issue for "we agreed to do X" or a confirmed defect.
+blank_issues_enabled: false
+contact_links:
+  - name: Question or usage help
+    url: https://github.com/baabakk/versioned-store/discussions/categories/q-a
+    about: How do I do X, is this the right tool, why does it behave this way.
+  - name: Idea or design proposal
+    url: https://github.com/baabakk/versioned-store/discussions/categories/ideas
+    about: Propose a feature, a new backend, or an API change before writing code.
+  - name: Security vulnerability
+    url: https://github.com/baabakk/versioned-store/security/advisories/new
+    about: Report privately. Do not open a public issue. See SECURITY.md.
