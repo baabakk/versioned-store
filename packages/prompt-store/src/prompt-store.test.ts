@@ -70,3 +70,40 @@ describe("error taxonomy", () => {
     });
   });
 });
+
+describe("var-schema detection is structural (survives a duplicated zod) — TD-VS-06", () => {
+  // A schema object shaped like a ZodObject but NOT an instance of THIS package's z.ZodObject: exactly what
+  // a consumer with a duplicated/version-split zod would pass. The old `instanceof z.ZodObject` returned []
+  // for it, silently disabling the promote-gate's unknown-placeholder check. The structural check enumerates
+  // its fields by `.shape`, so the gate works regardless of which zod copy built the schema.
+  const foreignSchema = {
+    shape: { name: {}, tone: {} },
+    safeParse: (v: unknown) => ({ success: true as const, data: v }),
+  } as unknown as z.ZodType;
+
+  function makeForeignStore() {
+    return createPromptStore({
+      backend: createInMemoryBackend(),
+      defaults: { greet: { text: "Hi {{name}}" } },
+      varSchemas: { greet: foreignSchema },
+    });
+  }
+
+  test("knownPlaceholders enumerates a foreign-zod object schema's fields", () => {
+    assert.deepEqual(makeForeignStore().knownPlaceholders("greet").sort(), ["name", "tone"]);
+  });
+
+  test("unknownPlaceholders flags a placeholder outside a foreign-zod schema", () => {
+    assert.deepEqual(makeForeignStore().unknownPlaceholders("greet", "Hi {{name}} {{bogus}}"), ["bogus"]);
+  });
+
+  test("a scalar (non-object) schema is still treated as no-shape, not a crash", () => {
+    const store = createPromptStore({
+      backend: createInMemoryBackend(),
+      defaults: { s: { text: "x" } },
+      varSchemas: { s: z.string() as unknown as z.ZodType },
+    });
+    assert.deepEqual(store.knownPlaceholders("s"), []);
+    assert.deepEqual(store.unknownPlaceholders("s", "x {{y}}"), []);
+  });
+});

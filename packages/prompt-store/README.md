@@ -36,4 +36,4 @@ await prompts.promote("greeting", v); // throws: {{unknown}} is not in the var s
 - **Storage-portable** — bring any `@versioned-store/core` backend (SQLite by default; Postgres / Mongo / Redis / File / InMemory).
 - **Arbitrary breadth** — need to version non-prompt config too? Use `@versioned-store/core` directly.
 
-`zod` is a peer dependency. MIT.
+`zod` is a peer dependency: bring your own copy, and any `zod@^3.23 || ^4` works. Var-schema fields are detected structurally (by the schema's `.shape`), not by `instanceof`, so validation and the unknown-placeholder gate work correctly even if your dependency tree happens to resolve more than one copy of zod. MIT.

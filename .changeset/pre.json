@@ -7,6 +7,7 @@
     "@versioned-store/scaffold-store": "0.0.0"
   },
   "changesets": [
-    "initial-alpha"
+    "initial-alpha",
+    "structural-zod-detection"
   ]
 }

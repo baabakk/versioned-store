@@ -104,6 +104,25 @@ function defaultSha256(s: string): string {
   return createHash("sha256").update(s).digest("hex");
 }
 
+/**
+ * The field map of a Zod object schema, or null when the schema is not object-like.
+ *
+ * Deliberately structural rather than `instanceof z.ZodObject`. `instanceof` is only true when this package's
+ * zod and the consumer's zod are the SAME module instance; a version split, or a bundler that duplicates zod,
+ * makes it false and silently disables the unknown-placeholder detection below. (Render-time validation is not
+ * affected: `renderPinned` calls `.safeParse` on the consumer's own schema instance, which works across copies.
+ * The gap was only the promote-gate's placeholder check, which needs to ENUMERATE the schema's field names.)
+ * Duck-typing on `.shape` (present on a ZodObject, absent on scalar schemas) works across duplicate copies and
+ * across zod 3 and 4.
+ */
+function zodObjectShape(schema: unknown): Record<string, unknown> | null {
+  if (schema && typeof schema === "object" && "shape" in schema) {
+    const shape = (schema as { shape?: unknown }).shape;
+    if (shape && typeof shape === "object") return shape as Record<string, unknown>;
+  }
+  return null;
+}
+
 export function createPromptStore(opts: PromptStoreOptions): PromptStore {
   const hash = opts.hash ?? defaultSha256;
   const varSchemas = opts.varSchemas ?? {};
@@ -124,14 +143,14 @@ export function createPromptStore(opts: PromptStoreOptions): PromptStore {
   );
 
   function knownPlaceholders(key: string): string[] {
-    const schema = varSchemas[key];
-    return schema instanceof z.ZodObject ? Object.keys(schema.shape) : [];
+    const shape = zodObjectShape(varSchemas[key]);
+    return shape ? Object.keys(shape) : [];
   }
 
   function unknownPlaceholders(key: string, text: string): string[] {
-    const schema = varSchemas[key];
-    if (!(schema instanceof z.ZodObject)) return [];
-    const known = new Set(Object.keys(schema.shape));
+    const shape = zodObjectShape(varSchemas[key]);
+    if (!shape) return [];
+    const known = new Set(Object.keys(shape));
     const found = new Set([...text.matchAll(/\{\{(\w[\w.-]*)\}\}/g)].map((m) => m[1]));
     return [...found].filter((p) => !known.has(p));
   }
