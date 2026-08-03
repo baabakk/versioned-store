@@ -1,6 +1,6 @@
 {
   "name": "@versioned-store/core",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.2",
   "description": "Embedded-first, storage-portable, immutable-versioned config primitive with an eval-gate coupled to promote. Arbitrary payload T; SQLite/File/InMemory/Postgres/Mongo/Redis backends.",
   "type": "module",
   "author": "Babak",

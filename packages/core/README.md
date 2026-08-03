@@ -106,6 +106,26 @@ Every backend passes the same conformance suite: the immutability and compare-an
 - **Canary and shadow** (`canary`): weighted resolution plus gate-driven auto-rollback. A failing canary is demoted to the last-known-good and alarmed, embedded, with no hosted service.
 - **CLI** (`npx versioned-store <verb> ...`): keys, versions, get, label, promote, rollback, export, import, migrate.
 
+## Error handling
+
+Every error the store throws extends `VersionedStoreError` (subclasses: `VersionNotFoundError`, `GateRejectedError`, `CasExhaustedError`, `BackendConflictError`), so one blanket `catch` covers the whole library. Prefer the `isVersionedStoreError(e)` guard over `e instanceof VersionedStoreError`:
+
+```ts
+import { isVersionedStoreError } from "@versioned-store/core";
+
+try {
+  await store.promote("greeting", 7, { gate });
+} catch (e) {
+  if (isVersionedStoreError(e)) {
+    // any store failure: a rejected gate, a missing version, CAS exhaustion...
+  } else {
+    throw e;
+  }
+}
+```
+
+`isVersionedStoreError` matches even an error thrown by a second loaded copy of the package (a transitive version split, or a bundler that duplicates it), where `instanceof` silently returns false. A subclass check still lets a specific handler add one line.
+
 ## Certifying a new backend
 
 Implement the `VersionedStoreBackend` contract (`backend.ts`, eight methods), then run the same suite this repo runs against its own adapters:

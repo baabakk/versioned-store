@@ -7,17 +7,27 @@
 //
 // `changeset publish` in pre mode is expected to publish under the pre tag, so on a clean run this script is
 // a no-op that proves the expectation held. It is the assertion, not the mechanism: the value is that it
-// FAILS LOUDLY on the release turn if npm's tag state drifted, instead of a consumer discovering it later.
+// moves the tag or FAILS LOUDLY on the release turn, instead of a consumer discovering the drift later.
 // It is idempotent and safe to re-run.
+//
+// Registry read-lag (the reason reconcile does NOT gate on a read): immediately after `changeset publish`,
+// `npm view <name> dist-tags` frequently returns a cached 404 because the public read replicas lag the
+// authenticated write by up to a minute or two. A single 404 is therefore NOT proof the package is
+// unpublished. In reconcile mode the WRITE is authoritative: `npm dist-tag add name@version alpha` succeeds
+// iff the version is live, so we attempt it unconditionally and read only best-effort for the report. Only
+// `--check` (which mutates nothing) relies on the read, and it retries with backoff.
 //
 //   node scripts/retag-alpha.mjs           # reconcile: point `alpha` at each package's current version
 //   node scripts/retag-alpha.mjs --check   # verify only, mutate nothing, exit 1 on drift (CI / dry-run)
 
 import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execSync } from "node:child_process";
 
 const CHECK_ONLY = process.argv.includes("--check");
 const ROOT = new URL("../", import.meta.url);
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const isPrerelease = (v) => v.includes("-");
 
 /** Every publishable workspace package (private ones are skipped). */
 function publishablePackages() {
@@ -30,43 +40,70 @@ function publishablePackages() {
     .filter((p) => !p.private);
 }
 
+// Run through a shell (execSync), NOT execFileSync. This release is run manually from the maintainer's Windows
+// box (there is no CI publish job), where `npm` is `npm.cmd`: `execFileSync("npm", ...)` looks for a literal
+// `npm` executable and throws ENOENT, and naming `npm.cmd` is blocked by Node's CVE-2024-27980 `.cmd`-spawn
+// guard unless a shell is used. That made every read throw, so the script reported "not published" for every
+// package and silently never moved the `alpha` tag: the real TD-VS-08 root cause, mis-attributed to registry
+// read-lag. A shell resolves `npm` via PATHEXT on Windows and normally on POSIX. execSync (a command string)
+// rather than execFileSync + `shell:true` avoids Node 22's DEP0190; our args are fixed shell-safe tokens
+// (semver versions + scoped package names, no spaces or metacharacters), so joining them is not an injection
+// surface here.
 function npm(args) {
-  return execFileSync("npm", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  return execSync(`npm ${args.join(" ")}`, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
-const isPrerelease = (v) => v.includes("-");
+/** Every version on the registry for `name`, or [] if the package is unreadable / absent. */
+function publishedVersions(name) {
+  try {
+    const raw = JSON.parse(npm(["view", name, "versions", "--json"]));
+    return Array.isArray(raw) ? raw : [raw].filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** True iff the package exists at all (distinguishes a genuinely absent package from a lagging read). */
+const packageExists = (name) => publishedVersions(name).length > 0;
+
+/**
+ * Read a package's dist-tags, resilient to the read replicas lagging the write. A single 404 is not proof of
+ * "unpublished", so retry with exponential backoff, then fall back to a `versions` probe to tell a genuinely
+ * absent package apart from a published-but-lagging one. Returns one of:
+ *   { state: "ok", tags }   read succeeded
+ *   { state: "absent" }     confirmed never published (dist-tags AND versions both unreadable)
+ *   { state: "unreadable" } published (versions visible) but the tag read did not settle in the budget
+ */
+async function readDistTags(name, attempts) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return { state: "ok", tags: JSON.parse(npm(["view", name, "dist-tags", "--json"])) };
+    } catch {
+      if (i < attempts - 1) await sleep(Math.min(2000 * 2 ** i, 30000)); // 2s, 4s, 8s, 16s, 30s...
+    }
+  }
+  return { state: packageExists(name) ? "unreadable" : "absent" };
+}
 
 let drift = 0;
 let reconciled = 0;
 
 for (const { name, version } of publishablePackages()) {
-  let tags;
-  try {
-    tags = JSON.parse(npm(["view", `${name}`, "dist-tags", "--json"]));
-  } catch {
-    console.log(`- ${name}: not published yet, nothing to reconcile`);
-    continue;
-  }
-
   if (!isPrerelease(version)) {
     console.log(`- ${name}@${version} is not a prerelease; the alpha line does not apply`);
     continue;
   }
 
-  // `latest` pointing at a prerelease is only a problem once a STABLE version exists for it to track.
-  // For an alpha-only package there is no stable release yet, so latest = the alpha is the only sensible
-  // value (it is what makes a bare `npm install ${name}` resolve at all). Only flag a genuine regression:
-  // latest sitting on a prerelease while a stable version is available.
-  if (tags.latest && isPrerelease(tags.latest)) {
-    let versions = [];
-    try {
-      const raw = JSON.parse(npm(["view", name, "versions", "--json"]));
-      versions = Array.isArray(raw) ? raw : [raw].filter(Boolean);
-    } catch {
-      // ignore; treated as no-known-stable below
-    }
-    const hasStable = versions.some((v) => !isPrerelease(v));
-    if (hasStable) {
+  // --check must rely on the read (it mutates nothing), so give it a real retry budget. Reconcile reads
+  // best-effort only, for the report and the latest-guard; its write does not depend on the read.
+  const read = await readDistTags(name, CHECK_ONLY ? 6 : 1);
+  const tags = read.state === "ok" ? read.tags : undefined;
+
+  // latest-on-prerelease guard: only a real regression once a STABLE version exists for latest to track.
+  // For an alpha-only package, latest = the alpha is the only sensible value (it is what makes a bare
+  // `npm install ${name}` resolve at all). Skipped entirely when the read did not settle.
+  if (tags?.latest && isPrerelease(tags.latest)) {
+    if (publishedVersions(name).some((v) => !isPrerelease(v))) {
       console.error(`! ${name}: dist-tag "latest" points at the prerelease ${tags.latest}, but a stable version exists.`);
       console.error(`  Every plain "npm install ${name}" now serves an alpha. Repoint latest at the stable:`);
       console.error(`  npm dist-tag add ${name}@<stable> latest`);
@@ -76,20 +113,37 @@ for (const { name, version } of publishablePackages()) {
     }
   }
 
-  if (tags.alpha === version) {
+  if (CHECK_ONLY) {
+    if (read.state === "absent") {
+      console.log(`- ${name}: not published yet, nothing to check`);
+    } else if (read.state === "unreadable") {
+      console.error(`! ${name}: published, but its dist-tags did not settle within the read budget; cannot verify alpha -> ${version}.`);
+      drift++;
+    } else if (tags.alpha === version) {
+      console.log(`- ${name}: alpha -> ${version} (already correct)`);
+    } else {
+      console.error(`! ${name}: alpha -> ${tags.alpha ?? "(unset)"} but this package is at ${version}`);
+      drift++;
+    }
+    continue;
+  }
+
+  // Reconcile mode: the write is authoritative and independent of the (possibly lagging) read. Skip the
+  // write only when a FRESH read already shows the tag correct; otherwise attempt it. Setting alpha to the
+  // version it already holds is a harmless no-op, so a stale read never causes a wrong action. A true
+  // "version not published" is the only way `dist-tag add` fails, and that is handled gracefully.
+  if (read.state === "ok" && tags.alpha === version) {
     console.log(`- ${name}: alpha -> ${version} (already correct)`);
     continue;
   }
-
-  if (CHECK_ONLY) {
-    console.error(`! ${name}: alpha -> ${tags.alpha ?? "(unset)"} but this package is at ${version}`);
-    drift++;
-    continue;
+  try {
+    npm(["dist-tag", "add", `${name}@${version}`, "alpha"]);
+    const was = read.state === "ok" ? (tags.alpha ?? "unset") : "unread (registry read lagged)";
+    console.log(`+ ${name}: alpha -> ${version} (was ${was})`);
+    reconciled++;
+  } catch {
+    console.log(`- ${name}@${version}: not published yet, nothing to reconcile`);
   }
-
-  npm(["dist-tag", "add", `${name}@${version}`, "alpha"]);
-  console.log(`+ ${name}: alpha -> ${version} (was ${tags.alpha ?? "unset"})`);
-  reconciled++;
 }
 
 if (drift > 0) {
