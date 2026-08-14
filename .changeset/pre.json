@@ -7,7 +7,9 @@
     "@versioned-store/scaffold-store": "0.0.0"
   },
   "changesets": [
+    "core-promote-note-interface",
     "error-brand-guard",
+    "facades-promote-surface-passthrough",
     "initial-alpha",
     "promote-path-and-fixes",
     "structural-zod-detection"

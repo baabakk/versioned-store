@@ -1,6 +1,6 @@
 {
   "name": "@versioned-store/scaffold-store",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.4",
   "description": "A batteries-included, versioned scaffold store with a deterministic promote-gate (pinning + placeholder-binding + executable allowlist), built on @versioned-store/core. Version, gate, and roll back your project scaffolds.",
   "type": "module",
   "author": "Babak",
@@ -33,6 +33,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "prepublishOnly": "npm run build"
   },
@@ -47,7 +48,7 @@
     "monorepo"
   ],
   "dependencies": {
-    "@versioned-store/core": "^0.1.0-alpha.0"
+    "@versioned-store/core": "^0.1.0-alpha.4"
   },
   "peerDependencies": {
     "zod": "^3.23.0 || ^4.0.0"
