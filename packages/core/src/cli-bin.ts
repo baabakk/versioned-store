@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Bin wrapper for the packaged CLI (copied to src/cli-bin.ts during extraction). Thin, so run() stays
 // unit-testable with an injected clock; here it gets the real one.
 import { run } from "./cli.js";

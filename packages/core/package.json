@@ -21,7 +21,7 @@
     "node": ">=18"
   },
   "bin": {
-    "versioned-store": "./dist/cli-bin.js"
+    "versioned-store": "dist/cli-bin.js"
   },
   "exports": {
     ".": {
