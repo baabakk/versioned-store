@@ -9,6 +9,7 @@
   "changesets": [
     "error-brand-guard",
     "initial-alpha",
+    "promote-path-and-fixes",
     "structural-zod-detection"
   ]
 }
