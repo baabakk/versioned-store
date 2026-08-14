@@ -108,7 +108,7 @@ Every backend passes the same conformance suite: the immutability and compare-an
 
 ## Error handling
 
-Every error the store throws extends `VersionedStoreError` (subclasses: `VersionNotFoundError`, `GateRejectedError`, `CasExhaustedError`, `BackendConflictError`), so one blanket `catch` covers the whole library. Prefer the `isVersionedStoreError(e)` guard over `e instanceof VersionedStoreError`:
+Every error the store throws extends `VersionedStoreError` (subclasses: `VersionNotFoundError`, `GateRejectedError`, `CasExhaustedError`, `BackendConflictError`, `KillSwitchNotSupportedError`), so one blanket `catch` covers the whole library. Prefer the `isVersionedStoreError(e)` guard over `e instanceof VersionedStoreError`:
 
 ```ts
 import { isVersionedStoreError } from "@versioned-store/core";
