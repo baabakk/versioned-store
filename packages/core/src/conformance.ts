@@ -142,6 +142,10 @@ export function runConformance(name: string, make: () => VersionedStoreBackend):
 
     test("concurrent addVersion: CAS retry yields distinct sequential versions (no lost update)", async () => {
       const s = createVersionedStore<Payload>(coreCfg, make());
+      // CAS relies on the unique (key,version) index, which Mongo only has after ensureIndexes(). Every other
+      // Part B test creates it; this one omitted it, so on Mongo the racing writers both won v1 ([1,1,2,2]) and
+      // the lost-update this test exists to catch went undetected. See versioned-store issue #3.
+      await s.ensureIndexes();
       const N = 4; // < MAX_CAS_ATTEMPTS(5): the worst-case writer needs at most N attempts, leaving margin
       const results = await Promise.all(Array.from({ length: N }, (_, i) => s.addVersion("hot", { text: `v${i}` })));
       assert.deepEqual([...results].sort((a, b) => a - b), [1, 2, 3, 4]); // every call won a unique version
