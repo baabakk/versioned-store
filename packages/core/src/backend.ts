@@ -27,6 +27,10 @@ export interface LabelDoc {
   version: number;
   promotedAtIso: string;
   promotedBy: string;
+  /** Optional operator-supplied reason for this promotion (e.g. "rollback: v7 regressed cue quality"). */
+  note?: string;
+  /** Consumer-owned trace metadata stamped at promote (same value emitted on the promote-accepted event). */
+  refs?: Record<string, unknown>;
 }
 
 /**

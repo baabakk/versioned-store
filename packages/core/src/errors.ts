@@ -68,3 +68,17 @@ export class CasExhaustedError extends VersionedStoreError {
     this.name = "CasExhaustedError";
   }
 }
+
+/**
+ * `promote(key, 0)` was called. Version 0 is the in-code default sentinel that `codeDefault()` returns, never a
+ * stored version, so it cannot be promoted. Use `revertToCodeDefault(key)` for the supported kill-switch.
+ */
+export class KillSwitchNotSupportedError extends VersionedStoreError {
+  constructor(
+    public readonly domain: string,
+    public readonly key: string,
+  ) {
+    super(`[store:${domain}] cannot promote ${key} v0: version 0 is the in-code default sentinel, not a stored version. Use revertToCodeDefault("${key}") to return to the in-code default.`);
+    this.name = "KillSwitchNotSupportedError";
+  }
+}

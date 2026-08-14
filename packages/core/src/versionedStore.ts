@@ -1,7 +1,7 @@
-import { emitStoreEvent, recordFallback, STORE_EVENT_SCHEMA_VERSION } from "./events.js";
+import { emitStoreEvent, STORE_EVENT_SCHEMA_VERSION, type StoreEvent, type FallbackReason } from "./events.js";
 import { BackendConflictError, type StoredDoc, type VersionedStoreBackend } from "./backend.js";
 import { storeLog } from "./logger.js";
-import { CasExhaustedError, GateRejectedError, VersionNotFoundError } from "./errors.js";
+import { CasExhaustedError, GateRejectedError, KillSwitchNotSupportedError, VersionedStoreError, VersionNotFoundError } from "./errors.js";
 
 /** Max optimistic-CAS retries on the version bump before giving up (a hot-loop bound, never hit in practice). */
 const MAX_CAS_ATTEMPTS = 5;
@@ -82,6 +82,13 @@ export interface VersionedStoreConfig<T> {
    * seeded is not (a genuine alarm). Real anomalies (resolve-error, schema-invalid) always WARN.
    */
   codeDefaultIsFirstClass?: boolean;
+  /**
+   * Optional durable event sink. Called on EVERY store event (fallback, gate-outcome, promote-refused,
+   * promote-accepted), alongside the injected logger, so a host can persist an at-source audit trail that
+   * captures promotions bypassing any wrapper (the ungated kill-switch, scripts, admin routes). Errors thrown
+   * by the sink are swallowed, so a sink failure never disrupts a promote or a resolve.
+   */
+  onEvent?: (event: StoreEvent) => void;
 }
 
 export interface VersionedStore<T> {
@@ -104,6 +111,13 @@ export interface VersionedStore<T> {
   syncDefaults(): Promise<Array<{ key: string; action: "seeded" | "updated" | "unchanged" }>>;
   /** The in-code default as a Resolved (sentinel version 0), or null when the key has no default. */
   codeDefault(key: string): Resolved<T> | null;
+  /**
+   * Return a key to its in-code default: add the default as a new immutable version and promote it, UNGATED
+   * (a kill-switch a gate can block is not a kill-switch; the default is boot-proven safe). Returns the new
+   * version. Throws when the key has no in-code default. This is the supported single-key kill-switch; prefer
+   * it over `syncDefaults()` (reverts every key) and over `promote(key, 0)` (0 is the sentinel, not stored).
+   */
+  revertToCodeDefault(key: string, opts?: { by?: string; note?: string; label?: string }): Promise<number>;
 }
 
 /**
@@ -124,6 +138,23 @@ export function createVersionedStore<T>(cfg: VersionedStoreConfig<T>, backend: V
     return { key, version: 0, sha256: cfg.hash(d), value: d };
   }
 
+  // Fan every store event out to the injected logger (emitStoreEvent) AND, when configured, the durable sink
+  // (cfg.onEvent). Sink errors are swallowed: a failing sink must never break a promote or a resolve.
+  function emit(event: StoreEvent, opts?: { alarm?: boolean }): void {
+    emitStoreEvent(event, opts);
+    if (cfg.onEvent) {
+      try {
+        cfg.onEvent(event);
+      } catch (err) {
+        log.warn({ err: err instanceof Error ? err.message : String(err) }, "onEvent sink threw (swallowed)");
+      }
+    }
+  }
+
+  function emitFallback(key: string, reason: FallbackReason, opts: { alarm?: boolean; extra?: Record<string, unknown> } = {}): void {
+    emit({ schemaVersion: STORE_EVENT_SCHEMA_VERSION, type: "fallback", domain: cfg.domain, key, reason, extra: opts.extra }, { alarm: opts.alarm });
+  }
+
   function validate(value: T): T {
     return cfg.validate ? cfg.validate(value) : value;
   }
@@ -136,13 +167,13 @@ export function createVersionedStore<T>(cfg: VersionedStoreConfig<T>, backend: V
 
   async function resolve(key: string, label = DEFAULT_LABEL): Promise<Resolved<T> | null> {
     if (cfg.backendAvailable && !cfg.backendAvailable()) {
-      recordFallback(cfg.domain, key, "backend-unavailable");
+      emitFallback(key, "backend-unavailable");
       return codeDefault(key);
     }
     try {
       const ptr = await backend.getLabel(key, label);
       if (!ptr || typeof ptr.version !== "number") {
-        recordFallback(cfg.domain, key, "label-missing", { alarm: !cfg.codeDefaultIsFirstClass, extra: { label } });
+        emitFallback(key, "label-missing", { alarm: !cfg.codeDefaultIsFirstClass, extra: { label } });
         return codeDefault(key);
       }
       const cacheKey = `${key}:v${ptr.version}`;
@@ -150,19 +181,19 @@ export function createVersionedStore<T>(cfg: VersionedStoreConfig<T>, backend: V
       if (cached) return cached;
       const doc = await backend.getVersion(key, ptr.version);
       if (!doc) {
-        recordFallback(cfg.domain, key, "doc-missing", { alarm: !cfg.codeDefaultIsFirstClass, extra: { version: ptr.version } });
+        emitFallback(key, "doc-missing", { alarm: !cfg.codeDefaultIsFirstClass, extra: { version: ptr.version } });
         return codeDefault(key);
       }
       const resolved = docToResolved(key, doc);
       if (!resolved) {
         // A stored value failing validation is a real anomaly, so it always alarms (even for scaffolds).
-        recordFallback(cfg.domain, key, "schema-invalid", { extra: { version: ptr.version } });
+        emitFallback(key, "schema-invalid", { extra: { version: ptr.version } });
         return codeDefault(key);
       }
       cache.set(cacheKey, resolved);
       return resolved;
     } catch (err) {
-      recordFallback(cfg.domain, key, "resolve-error", { extra: { label, err: err instanceof Error ? err.message : String(err) } });
+      emitFallback(key, "resolve-error", { extra: { label, err: err instanceof Error ? err.message : String(err) } });
       return codeDefault(key);
     }
   }
@@ -212,21 +243,33 @@ export function createVersionedStore<T>(cfg: VersionedStoreConfig<T>, backend: V
     throw new CasExhaustedError(cfg.domain, key, MAX_CAS_ATTEMPTS);
   }
 
-  async function promote(key: string, version: number, opts: { label?: string; by?: string; gate?: Gate<T>; refs?: Record<string, unknown> } = {}): Promise<void> {
+  async function promote(key: string, version: number, opts: { label?: string; by?: string; gate?: Gate<T>; refs?: Record<string, unknown>; note?: string } = {}): Promise<void> {
+    if (version === 0) throw new KillSwitchNotSupportedError(cfg.domain, key);
     const existing = await getVersion(key, version);
     if (!existing) throw new VersionNotFoundError(cfg.domain, key, version);
     const label = opts.label ?? DEFAULT_LABEL;
     if (opts.gate) {
       const result = await opts.gate(existing.value);
-      emitStoreEvent({ schemaVersion: STORE_EVENT_SCHEMA_VERSION, type: "gate-outcome", domain: cfg.domain, key, version, passed: result.passed, failures: result.failures, refs: opts.refs });
+      emit({ schemaVersion: STORE_EVENT_SCHEMA_VERSION, type: "gate-outcome", domain: cfg.domain, key, version, passed: result.passed, failures: result.failures, refs: opts.refs });
       if (!result.passed) {
-        emitStoreEvent({ schemaVersion: STORE_EVENT_SCHEMA_VERSION, type: "promote-refused", domain: cfg.domain, key, version, label, failures: result.failures, refs: opts.refs });
+        emit({ schemaVersion: STORE_EVENT_SCHEMA_VERSION, type: "promote-refused", domain: cfg.domain, key, version, label, failures: result.failures, refs: opts.refs });
         throw new GateRejectedError(cfg.domain, key, version, result.failures);
       }
     }
-    await backend.upsertLabel({ key, label, version, promotedAtIso: new Date().toISOString(), promotedBy: opts.by ?? "admin" });
-    emitStoreEvent({ schemaVersion: STORE_EVENT_SCHEMA_VERSION, type: "promote-accepted", domain: cfg.domain, key, version, label, by: opts.by ?? "admin", refs: opts.refs });
+    await backend.upsertLabel({ key, label, version, promotedAtIso: new Date().toISOString(), promotedBy: opts.by ?? "admin", note: opts.note, refs: opts.refs });
+    emit({ schemaVersion: STORE_EVENT_SCHEMA_VERSION, type: "promote-accepted", domain: cfg.domain, key, version, label, by: opts.by ?? "admin", note: opts.note, refs: opts.refs });
     log.info({ key, version, label, by: opts.by ?? "admin" }, "promoted");
+  }
+
+  async function revertToCodeDefault(key: string, opts: { by?: string; note?: string; label?: string } = {}): Promise<number> {
+    const cd = codeDefault(key);
+    if (!cd) throw new VersionedStoreError(`[store:${cfg.domain}] cannot revert ${key} to the in-code default: no default is registered for this key`);
+    const by = opts.by ?? "revert";
+    const note = opts.note ?? "reverted to in-code default";
+    const v = await addVersion(key, cd.value, { by, note });
+    // Ungated by design: a kill-switch a gate can block is not a kill-switch, and the default is boot-proven safe.
+    await promote(key, v, { by, note, label: opts.label });
+    return v;
   }
 
   async function listVersions(key: string): Promise<VersionInfo[]> {
@@ -295,5 +338,5 @@ export function createVersionedStore<T>(cfg: VersionedStoreConfig<T>, backend: V
     return out;
   }
 
-  return { resolve, getVersion, getActiveVersion, addVersion, promote, listVersions, listKeys, ensureIndexes, seedDefaults, syncDefaults, codeDefault };
+  return { resolve, getVersion, getActiveVersion, addVersion, promote, revertToCodeDefault, listVersions, listKeys, ensureIndexes, seedDefaults, syncDefaults, codeDefault };
 }

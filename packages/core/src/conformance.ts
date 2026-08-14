@@ -87,6 +87,18 @@ export function runConformance(name: string, make: () => VersionedStoreBackend):
       assert.equal((await b.getLabel("k", "active"))?.version, 2);
     });
 
+    test("labels: optional note + refs round-trip through upsertLabel/getLabel", async () => {
+      const b = make();
+      await b.init();
+      await b.upsertLabel({
+        key: "k", label: "active", version: 1, promotedAtIso: "t1", promotedBy: "u",
+        note: "rollback: v2 regressed", refs: { experiment: "A", promptVersion: 1 },
+      });
+      const got = await b.getLabel("k", "active");
+      assert.equal(got?.note, "rollback: v2 regressed");
+      assert.deepEqual(got?.refs, { experiment: "A", promptVersion: 1 });
+    });
+
     test("init is idempotent (re-run after data exists does not wipe or throw)", async () => {
       const b = make();
       await b.init();

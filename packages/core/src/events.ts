@@ -3,8 +3,10 @@ import { storeLog } from "./logger.js";
 const log = storeLog("store-events");
 
 /**
- * Stable, versioned schema for structured store observability events (design 08 M3). Bump when the shape of
- * any StoreEvent variant changes, so a consumer wiring alerts can gate on `schemaVersion`.
+ * Stable, versioned schema for structured store observability events (design 08 M3). Bump when a variant is
+ * RESHAPED (a field removed or retyped); an additive OPTIONAL field does not require a bump (project rule:
+ * "add fields, do not reshape, without a version bump"), so a consumer gating alerts on `schemaVersion` still
+ * receives new optional fields within the same version.
  */
 export const STORE_EVENT_SCHEMA_VERSION = 1;
 
@@ -32,7 +34,7 @@ export type FallbackReason =
 export type StoreEvent =
   | { schemaVersion: typeof STORE_EVENT_SCHEMA_VERSION; type: "fallback"; domain: string; key: string; reason: FallbackReason; extra?: Record<string, unknown>; refs?: Record<string, unknown> }
   | { schemaVersion: typeof STORE_EVENT_SCHEMA_VERSION; type: "gate-outcome"; domain: string; key: string; version: number; passed: boolean; failures: string[]; refs?: Record<string, unknown> }
-  | { schemaVersion: typeof STORE_EVENT_SCHEMA_VERSION; type: "promote-accepted"; domain: string; key: string; version: number; label: string; by: string; refs?: Record<string, unknown> }
+  | { schemaVersion: typeof STORE_EVENT_SCHEMA_VERSION; type: "promote-accepted"; domain: string; key: string; version: number; label: string; by: string; note?: string; refs?: Record<string, unknown> }
   | { schemaVersion: typeof STORE_EVENT_SCHEMA_VERSION; type: "promote-refused"; domain: string; key: string; version: number; label: string; failures: string[]; refs?: Record<string, unknown> };
 
 const _counts = new Map<string, number>();

@@ -126,6 +126,30 @@ try {
 
 `isVersionedStoreError` matches even an error thrown by a second loaded copy of the package (a transitive version split, or a bundler that duplicates it), where `instanceof` silently returns false. A subclass check still lets a specific handler add one line.
 
+## Auditing promotions
+
+Every promote can carry an operator `note` and consumer-owned `refs`; both persist on the label and ride the `promote-accepted` event:
+
+```ts
+await store.promote("greeting", 7, { by: "alice", note: "rollback: v8 regressed", refs: { experiment: "A" } });
+```
+
+To capture that trail durably, including promotions that bypass any wrapper (a scripted or admin-route promote), pass an `onEvent` sink in the store config. It fires on every store event (`fallback`, `gate-outcome`, `promote-refused`, `promote-accepted`) alongside the logger, and a throwing sink is swallowed so it can never break a promote or a resolve:
+
+```ts
+const store = createVersionedStore({ ...cfg, onEvent: (event) => myEventBus.publish(event) }, backend);
+```
+
+Persisting the `promote-accepted` events is what lets you answer "which version was live at time T", which the movable label alone cannot (the label is overwritten on each promote).
+
+## Reverting to the code default
+
+`store.revertToCodeDefault(key)` is the supported single-key kill-switch: it adds the in-code default as a new version and promotes it, **ungated** (a kill-switch a gate can block is not a kill-switch), and returns the new version. Prefer it over `syncDefaults()` (which reverts every key) and over `promote(key, 0)` (0 is the sentinel, not a stored version, and now throws a clear `KillSwitchNotSupportedError` pointing here):
+
+```ts
+await store.revertToCodeDefault("greeting", { by: "oncall", note: "incident: bad promote" });
+```
+
 ## Certifying a new backend
 
 Implement the `VersionedStoreBackend` contract (`backend.ts`, eight methods), then run the same suite this repo runs against its own adapters:
