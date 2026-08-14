@@ -11,10 +11,11 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "changeset": "changeset",
     "changeset:version": "changeset version",
-    "release:alpha": "npm run build && changeset publish && node scripts/retag-alpha.mjs",
+    "release:alpha": "npm run build && npm run typecheck && changeset publish && node scripts/retag-alpha.mjs",
     "release:verify": "node scripts/retag-alpha.mjs --check"
   },
   "devDependencies": {

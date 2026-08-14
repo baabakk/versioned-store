@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
-import { createInMemoryBackend, VersionedStoreError } from "@versioned-store/core";
+import { createInMemoryBackend, VersionedStoreError, type StoreEvent } from "@versioned-store/core";
 import {
   BaseScaffoldSpecSchema,
   ScaffoldRenderError,
@@ -54,6 +54,53 @@ describe("resolve: a missing scaffold is normal, not an error", () => {
     await store.seedDefaults();
     const resolved = await store.core.resolve(VITE.key);
     assert.equal(resolved?.version, 1);
+  });
+});
+
+describe("alpha.4 facade passthrough: onEvent, revertToCodeDefault, note + refs", () => {
+  // A distinct spec that still clears the deterministic gate (pinned, allowed executable, only {dir}), so a
+  // promote is accepted and a later revert to VITE is observable in what resolveScaffold returns.
+  const VITE_NEXT: BaseScaffoldSpec = {
+    ...VITE,
+    scaffold: { ...VITE.scaffold, command: "npm create vite@9.2.0 {dir} -- --template react-ts" },
+  };
+
+  function makeStoreWith(onEvent?: (e: StoreEvent) => void) {
+    const backend = createInMemoryBackend();
+    const store = createScaffoldStore<BaseScaffoldSpec>({ backend, defaults: { [VITE.key]: VITE }, onEvent });
+    return { store, backend };
+  }
+
+  it("onEvent sink reaches the core and fires on promote-accepted, carrying note + refs", async () => {
+    const events: StoreEvent[] = [];
+    const { store } = makeStoreWith((e) => events.push(e));
+    const v = await store.addScaffoldVersion(VITE.key, VITE_NEXT);
+    await store.promote(VITE.key, v, { by: "op", note: "pinned bump", refs: { ticket: 9 } });
+    const accepted = events.find((e) => e.type === "promote-accepted");
+    assert.ok(accepted, "the sink received a promote-accepted event");
+    if (accepted.type === "promote-accepted") {
+      assert.equal(accepted.note, "pinned bump");
+      assert.deepEqual(accepted.refs, { ticket: 9 });
+    }
+  });
+
+  it("note + refs persist on the label through the gated facade promote", async () => {
+    const { store, backend } = makeStoreWith();
+    const v = await store.addScaffoldVersion(VITE.key, VITE_NEXT);
+    await store.promote(VITE.key, v, { note: "shipped", refs: { by: "ops" } });
+    const label = await backend.getLabel(VITE.key, "active");
+    assert.equal(label?.note, "shipped");
+    assert.deepEqual(label?.refs, { by: "ops" });
+  });
+
+  it("revertToCodeDefault returns the key to its in-code default spec (ungated)", async () => {
+    const { store } = makeStoreWith();
+    const v = await store.addScaffoldVersion(VITE.key, VITE_NEXT);
+    await store.promote(VITE.key, v);
+    assert.equal((await store.resolveScaffold(VITE.key))?.scaffold.command, VITE_NEXT.scaffold.command);
+    const rv = await store.revertToCodeDefault(VITE.key, { by: "op" });
+    assert.ok(rv > v, "adds and promotes a new version, not the sentinel");
+    assert.equal((await store.resolveScaffold(VITE.key))?.scaffold.command, VITE.scaffold.command);
   });
 });
 

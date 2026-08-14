@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { z } from "zod";
-import { createInMemoryBackend, VersionedStoreError } from "@versioned-store/core";
+import { createInMemoryBackend, VersionedStoreError, type StoreEvent } from "@versioned-store/core";
 import { PromptNotFoundError, PromptRenderError, createPromptStore } from "./index.js";
 
 function makeStore() {
@@ -46,6 +46,52 @@ describe("@versioned-store/prompt-store", () => {
     const s = makeStore();
     const pin = await s.resolvePin("greeting"); // "Hello, {{name}}!"
     assert.throws(() => s.renderPinned(pin, {}), /invalid vars|unbound placeholder/);
+  });
+});
+
+describe("alpha.4 facade passthrough: onEvent, revertToCodeDefault, note + refs", () => {
+  function makeStoreWith(onEvent?: (e: StoreEvent) => void) {
+    const backend = createInMemoryBackend();
+    const store = createPromptStore({
+      backend,
+      defaults: { greeting: { text: "Hello, {{name}}!" } },
+      varSchemas: { greeting: z.object({ name: z.string() }) },
+      goldens: { greeting: [{ name: "World" }] },
+      onEvent,
+    });
+    return { store, backend };
+  }
+
+  test("onEvent sink reaches the core and fires on promote-accepted, carrying note + refs", async () => {
+    const events: StoreEvent[] = [];
+    const { store } = makeStoreWith((e) => events.push(e));
+    const v = await store.addPromptVersion("greeting", "Hi {{name}}!");
+    await store.promote("greeting", v, { by: "op", note: "why promoted", refs: { exp: "A" } });
+    const accepted = events.find((e) => e.type === "promote-accepted");
+    assert.ok(accepted, "the sink received a promote-accepted event");
+    if (accepted.type === "promote-accepted") {
+      assert.equal(accepted.note, "why promoted");
+      assert.deepEqual(accepted.refs, { exp: "A" });
+    }
+  });
+
+  test("note + refs persist on the label through the gated facade promote", async () => {
+    const { store, backend } = makeStoreWith();
+    const v = await store.addPromptVersion("greeting", "Hi {{name}}!");
+    await store.promote("greeting", v, { note: "shipped", refs: { ticket: 7 } });
+    const label = await backend.getLabel("greeting", "active");
+    assert.equal(label?.note, "shipped");
+    assert.deepEqual(label?.refs, { ticket: 7 });
+  });
+
+  test("revertToCodeDefault returns the key to its in-code default (ungated)", async () => {
+    const { store } = makeStoreWith();
+    const v = await store.addPromptVersion("greeting", "Edited {{name}}");
+    await store.promote("greeting", v);
+    assert.equal((await store.resolvePin("greeting")).version, v);
+    const rv = await store.revertToCodeDefault("greeting", { by: "op" });
+    assert.ok(rv > v, "adds and promotes a new version, not the sentinel");
+    assert.equal(store.renderPinned(await store.resolvePin("greeting"), { name: "X" }), "Hello, X!");
   });
 });
 

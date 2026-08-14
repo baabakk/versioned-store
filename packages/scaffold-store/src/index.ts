@@ -16,6 +16,7 @@ import {
   createVersionedStore,
   VersionedStoreError,
   type KeySummary,
+  type StoreEvent,
   type VersionedStore,
   type VersionedStoreBackend,
   type VersionInfo,
@@ -240,6 +241,13 @@ export interface ScaffoldStoreOptions<T extends ScaffoldSpecLike, R = unknown> {
   keyFor?: (input: R) => string | null;
   /** Availability probe; when it returns false, resolve serves the code default quietly. */
   backendAvailable?: () => boolean;
+  /**
+   * Optional durable event sink, threaded through to the core. Called on every store event (fallback,
+   * gate-outcome, promote-refused, promote-accepted) alongside the injected logger, so a host can persist an
+   * at-source audit trail of scaffold promotions. Sink errors are swallowed, so a failing sink never disrupts
+   * a promote or a resolve.
+   */
+  onEvent?: (event: StoreEvent) => void;
   /** Content hash of a spec (default: sha256 of its stable JSON). */
   hash?: (spec: T) => string;
   defaultLabel?: string;
@@ -260,7 +268,13 @@ export interface ScaffoldStore<T extends ScaffoldSpecLike, R = unknown> {
   evalScaffoldVersion(key: string, spec: unknown): ScaffoldEvalResult;
   addScaffoldVersion(key: string, spec: T, opts?: { by?: string; note?: string }): Promise<number>;
   /** Gated: a spec that fails the deterministic gate is refused at the label flip. */
-  promote(key: string, version: number, opts?: { label?: string; by?: string }): Promise<void>;
+  promote(key: string, version: number, opts?: { label?: string; by?: string; note?: string; refs?: Record<string, unknown> }): Promise<void>;
+  /**
+   * Return a key to its in-code default: adds the default spec as a new version and promotes it, UNGATED
+   * (a kill-switch a gate can block is not a kill-switch). Returns the new version. The supported single-key
+   * kill-switch; prefer it over `syncDefaults` or `promote(key, 0)`.
+   */
+  revertToCodeDefault(key: string, opts?: { by?: string; note?: string; label?: string }): Promise<number>;
   listVersions(key: string): Promise<VersionInfo[]>;
   listKeys(): Promise<KeySummary[]>;
   ensureIndexes(): Promise<void>;
@@ -298,6 +312,7 @@ export function createScaffoldStore<T extends ScaffoldSpecLike, R = unknown>(
       domain: "scaffold",
       defaultLabel: opts.defaultLabel,
       backendAvailable: opts.backendAvailable,
+      onEvent: opts.onEvent,
       defaults: opts.defaults ?? {},
       hash,
       // The on-disk shape nests the spec under `spec`, matching the hand-written store this generalizes.
@@ -354,8 +369,11 @@ export function createScaffoldStore<T extends ScaffoldSpecLike, R = unknown>(
       core.promote(key, version, {
         label: o.label,
         by: o.by,
+        note: o.note,
+        refs: o.refs,
         gate: (value) => evalScaffoldSpec(key, value, schema, gateOpts),
       }),
+    revertToCodeDefault: (key, o = {}) => core.revertToCodeDefault(key, o),
     listVersions: (key) => core.listVersions(key),
     listKeys: () => core.listKeys(),
     ensureIndexes: () => core.ensureIndexes(),

@@ -12,6 +12,7 @@ import {
   recordFallback,
   VersionedStoreError,
   type KeySummary,
+  type StoreEvent,
   type VersionedStore,
   type VersionedStoreBackend,
   type VersionInfo,
@@ -77,6 +78,13 @@ export interface PromptStoreOptions {
   goldens?: PromptGoldens;
   /** Availability probe (e.g. `isMongoConfigured`); when it returns false, resolve serves the code default quietly. */
   backendAvailable?: () => boolean;
+  /**
+   * Optional durable event sink, threaded through to the core. Called on every store event (fallback,
+   * gate-outcome, promote-refused, promote-accepted) alongside the injected logger, so a host can persist an
+   * at-source audit trail of prompt promotions (which is what makes prompt promotion-history queryable). Sink
+   * errors are swallowed, so a failing sink never disrupts a promote or a resolve.
+   */
+  onEvent?: (event: StoreEvent) => void;
   /** Content hash of the template text (default sha256 of the text). */
   hash?: (text: string) => string;
   defaultLabel?: string;
@@ -90,7 +98,13 @@ export interface PromptStore {
   unknownPlaceholders(key: string, text: string): string[];
   evalPromptVersion(key: string, text: string, version?: number): PromptEvalResult;
   addPromptVersion(key: string, text: string, opts?: { config?: Record<string, unknown>; by?: string; note?: string }): Promise<number>;
-  promote(key: string, version: number, opts?: { label?: string; by?: string }): Promise<void>;
+  promote(key: string, version: number, opts?: { label?: string; by?: string; note?: string; refs?: Record<string, unknown> }): Promise<void>;
+  /**
+   * Return a key to its in-code default: adds the default as a new version and promotes it, UNGATED (a
+   * kill-switch a gate can block is not a kill-switch; the code default is boot-proven safe). Returns the new
+   * version. The supported single-key kill-switch; prefer it over `syncDefaults` or `promote(key, 0)`.
+   */
+  revertToCodeDefault(key: string, opts?: { by?: string; note?: string; label?: string }): Promise<number>;
   listVersions(key: string): Promise<VersionInfo[]>;
   listKeys(): Promise<KeySummary[]>;
   getPromptText(key: string, version?: number): Promise<{ version: number; text: string } | null>;
@@ -134,6 +148,7 @@ export function createPromptStore(opts: PromptStoreOptions): PromptStore {
       domain: "prompt",
       defaultLabel: opts.defaultLabel,
       backendAvailable: opts.backendAvailable,
+      onEvent: opts.onEvent,
       defaults: opts.defaults ?? {},
       hash: (v) => hash(v.text),
       toDoc: (v) => ({ text: v.text, config: v.config }),
@@ -213,6 +228,8 @@ export function createPromptStore(opts: PromptStoreOptions): PromptStore {
       core.promote(key, version, {
         label: o.label,
         by: o.by,
+        note: o.note,
+        refs: o.refs,
         gate: (value) => {
           const failures: string[] = [];
           const unknown = unknownPlaceholders(key, value.text);
@@ -233,5 +250,6 @@ export function createPromptStore(opts: PromptStoreOptions): PromptStore {
     },
     ensureIndexes: () => core.ensureIndexes(),
     seedDefaults: () => core.seedDefaults(),
+    revertToCodeDefault: (key, o = {}) => core.revertToCodeDefault(key, o),
   };
 }

@@ -103,6 +103,27 @@ const MySpecSchema = BaseScaffoldSpecSchema.extend({
 const scaffolds = createScaffoldStore<z.infer<typeof MySpecSchema>>({ backend, schema: MySpecSchema, defaults });
 ```
 
+## Audit and rollback
+
+Pass an `onEvent` sink to persist an at-source trail of every promotion, annotate each promote with a `note` and structured `refs`, and keep a single-key kill-switch for a spec that misbehaves in production:
+
+```ts
+const scaffolds = createScaffoldStore({
+  backend,
+  defaults,
+  onEvent: (e) => auditLog.append(e), // fallback, gate-outcome, promote-refused, promote-accepted
+});
+
+const v = await scaffolds.addScaffoldVersion(key, nextSpec);
+await scaffolds.promote(key, v, { by: "sre", note: "bump vite to 9.2.0", refs: { pr: 87 } });
+// note + refs persist on the label and ride the promote-accepted event.
+
+// Return one key to its in-code default, ungated (a kill-switch a gate could block is not a kill-switch):
+await scaffolds.revertToCodeDefault(key, { by: "sre", note: "9.2.0 scaffold broke CI" });
+```
+
+The sink fires alongside the injected logger, and its errors are swallowed, so a failing audit sink never disrupts a promote or a resolve.
+
 ## API
 
 | Member | Purpose |
@@ -113,7 +134,8 @@ const scaffolds = createScaffoldStore<z.infer<typeof MySpecSchema>>({ backend, s
 | `renderCommand(spec, vars?)` | strict `{placeholder}` binding; throws on unbound |
 | `evalScaffoldVersion(key, spec)` | run the gate without promoting |
 | `addScaffoldVersion(key, spec, opts?)` | insert an immutable version |
-| `promote(key, version, opts?)` | gated label flip (deploy / rollback) |
+| `promote(key, version, opts?)` | gated label flip (deploy / rollback); `opts.note` / `opts.refs` annotate it for the audit trail |
+| `revertToCodeDefault(key, opts?)` | ungated single-key kill-switch: re-promote the in-code default and return its new version |
 | `listVersions` / `listKeys` / `seedDefaults` / `syncDefaults` / `ensureIndexes` | admin verbs |
 | `core` | the underlying `VersionedStore<T>` |
 

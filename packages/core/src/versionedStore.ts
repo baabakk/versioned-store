@@ -101,7 +101,7 @@ export interface VersionedStore<T> {
   /** Insert a NEW immutable version (never overwrites); returns the new version number. Admin only. */
   addVersion(key: string, value: T, opts?: { by?: string; note?: string }): Promise<number>;
   /** Flip the movable label to an existing version, optionally gated. The explicit deploy/rollback verb. */
-  promote(key: string, version: number, opts?: { label?: string; by?: string; gate?: Gate<T>; refs?: Record<string, unknown> }): Promise<void>;
+  promote(key: string, version: number, opts?: { label?: string; by?: string; gate?: Gate<T>; refs?: Record<string, unknown>; note?: string }): Promise<void>;
   listVersions(key: string): Promise<VersionInfo[]>;
   listKeys(): Promise<KeySummary[]>;
   ensureIndexes(): Promise<void>;

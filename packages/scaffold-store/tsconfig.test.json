@@ -1,0 +1,12 @@
+{
+  "//": "Type-check-only config (TD-VS-12): compiles the test files too, which the publish build (tsconfig.json) excludes, with no emit. Catches a public-interface vs implementation drift that the tsx runner (types stripped) and the emit build (tests excluded) both miss. Not part of the published package.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

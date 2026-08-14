@@ -35,5 +35,30 @@ await prompts.promote("greeting", v); // throws: {{unknown}} is not in the var s
 - **A deterministic promote-gate** — render over golden inputs + Zod var-schema validation + unknown-placeholder detection. A broken prompt sits inactive.
 - **Storage-portable** — bring any `@versioned-store/core` backend (SQLite by default; Postgres / Mongo / Redis / File / InMemory).
 - **Arbitrary breadth** — need to version non-prompt config too? Use `@versioned-store/core` directly.
+- **Promotion audit + history:** pass an `onEvent` sink and every promote (ungated reverts and out-of-band scripts included) is captured at the source, so promotion history is queryable rather than reconstructed from logs.
+- **A single-key kill-switch:** `revertToCodeDefault(key)` returns one key to its in-code default, ungated, when a live version misbehaves.
+
+## Audit and rollback
+
+Pass an `onEvent` sink to persist an at-source trail of every promotion, and annotate each promote with a `note` and structured `refs`:
+
+```ts
+const prompts = createPromptStore({
+  backend: createInMemoryBackend(),
+  defaults: { greeting: { text: "Hello, {{name}}!" } },
+  varSchemas: { greeting: z.object({ name: z.string() }) },
+  goldens: { greeting: [{ name: "World" }] },
+  onEvent: (e) => auditLog.append(e), // fallback, gate-outcome, promote-refused, promote-accepted
+});
+
+const v = await prompts.addPromptVersion("greeting", "Hey {{name}}!");
+await prompts.promote("greeting", v, { by: "ada", note: "warmer tone", refs: { pr: 412 } });
+// note + refs persist on the label and ride the promote-accepted event.
+
+// If a live version misbehaves, revert one key to its in-code default (ungated):
+await prompts.revertToCodeDefault("greeting", { by: "ada", note: `regression in v${v}` });
+```
+
+The sink fires alongside the injected logger, and its errors are swallowed, so a failing audit sink never disrupts a promote or a resolve.
 
 `zod` is a peer dependency: bring your own copy, and any `zod@^3.23 || ^4` works. Var-schema fields are detected structurally (by the schema's `.shape`), not by `instanceof`, so validation and the unknown-placeholder gate work correctly even if your dependency tree happens to resolve more than one copy of zod. MIT.
