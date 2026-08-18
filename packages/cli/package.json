@@ -1,0 +1,57 @@
+{
+  "name": "@versioned-store/cli",
+  "version": "0.1.0-alpha.4",
+  "description": "A descriptor-driven operator CLI for @versioned-store: one uniform verb set (list/add/promote/revert/seed/sync/diff/health) over every store domain, with a gated promote and an audit-sink drain, so no consumer hand-rolls an admin surface.",
+  "type": "module",
+  "author": "Babak",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/baabakk/versioned-store.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/baabakk/versioned-store/tree/main/packages/cli#readme",
+  "bugs": "https://github.com/baabakk/versioned-store/issues",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "engines": {
+    "node": ">=18"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "versioned-store",
+    "cli",
+    "operator",
+    "admin",
+    "rollback",
+    "kill-switch",
+    "config-versioning"
+  ],
+  "dependencies": {
+    "@versioned-store/core": "^0.1.0-alpha.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
