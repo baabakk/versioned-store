@@ -99,3 +99,58 @@ export function getFallbackCounts(): Record<string, number> {
 export function resetStoreEventCounts(): void {
   _counts.clear();
 }
+
+/**
+ * An event sink that a host can FLUSH before the process exits.
+ *
+ * `onEvent` on the store config is synchronous by contract: the store calls it and discards the return,
+ * so a sink that persists to a networked store must do its I/O in a detached promise. That is correct for a
+ * long-lived host (the process outlives the write), and WRONG for a short-lived one: a CLI closes its backend
+ * connection the instant the verb returns, and the detached write loses its session. `createDrainableSink`
+ * resolves the tension: the sink stays fire-and-forget from the store's point of view (`onEvent` returns void
+ * and never throws), but the wrapper tracks each in-flight write, so whoever owns process lifetime can
+ * `await drain()` before closing. See `TD-VS-15`.
+ */
+export interface DrainableSink {
+  /** Wire this as the store config's `onEvent`. Returns void, never throws (a sink failure must not break a promote). */
+  onEvent: (event: StoreEvent) => void;
+  /** Await every write scheduled by `onEvent` so far. Call it after the verb, before closing the backend. */
+  drain: () => Promise<void>;
+}
+
+/**
+ * Wrap an async sink so its writes are drainable. `inner` does the actual persistence and RETURNS its promise
+ * (`async (event) => { await db.insert(...) }`) instead of detaching it; the wrapper does the detaching, so the
+ * store never blocks, and tracks the promise so `drain()` can await it. A sync throw or async rejection is
+ * caught and routed to `opts.onError` (default: a warning), never rethrown, preserving the swallow-and-warn
+ * posture: an audit row must never break a kill switch. `drain()` snapshots the writes in flight at call time,
+ * which for a CLI is every write the verb scheduled, because the store invokes `onEvent` synchronously inside
+ * the `await`ed promote/resolve.
+ */
+export function createDrainableSink(
+  inner: (event: StoreEvent) => void | Promise<void>,
+  opts: { onError?: (event: StoreEvent, err: unknown) => void } = {},
+): DrainableSink {
+  const inflight = new Set<Promise<void>>();
+  const onEvent = (event: StoreEvent): void => {
+    // The async IIFE turns a synchronous throw from `inner` into a rejection, so both failure modes land in
+    // the same `.catch`. The result is a Promise<void> (the catch handler returns void), so nothing rejects
+    // out of `inflight` and `drain()`'s `Promise.all` cannot itself reject.
+    const p = (async () => {
+      await inner(event);
+    })().catch((err: unknown) => {
+      if (opts.onError) opts.onError(event, err);
+      else
+        log.warn(
+          { err: err instanceof Error ? err.message : String(err), type: event.type, domain: event.domain, key: event.key },
+          "drainable sink write failed (swallowed)",
+        );
+    });
+    inflight.add(p);
+    void p.finally(() => inflight.delete(p));
+  };
+  const drain = async (): Promise<void> => {
+    await Promise.all([...inflight]);
+  };
+  return { onEvent, drain };
+}
