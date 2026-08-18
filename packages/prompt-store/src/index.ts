@@ -11,6 +11,8 @@ import {
   createVersionedStore,
   recordFallback,
   VersionedStoreError,
+  type DefaultsHealthReport,
+  type GateResult,
   type KeySummary,
   type StoreEvent,
   type VersionedStore,
@@ -110,6 +112,12 @@ export interface PromptStore {
   getPromptText(key: string, version?: number): Promise<{ version: number; text: string } | null>;
   ensureIndexes(): Promise<void>;
   seedDefaults(): Promise<Array<{ key: string; seeded: boolean }>>;
+  /**
+   * Run every code-default prompt through the SAME promote-gate (unknown-placeholder + golden-render) and
+   * return a report: whether each default could itself go live. The fallback-soundness check the store's
+   * fallback contract assumes; the policy on a failure (throw at boot, warn) is the caller's.
+   */
+  checkDefaults(): Promise<DefaultsHealthReport>;
   /** The underlying generic store, if you need core verbs directly. */
   core: VersionedStore<PromptPayload>;
 }
@@ -214,6 +222,21 @@ export function createPromptStore(opts: PromptStoreOptions): PromptStore {
     return { key: r.key, version: r.version, sha256: r.sha256, text: r.value.text, config: r.value.config };
   }
 
+  // The promote-gate as ONE shared closure, so `promote` and `checkDefaults` cannot drift: an unknown
+  // placeholder OR a golden-render eval failure fails the gate (a broken edit sits inactive). `version` only
+  // shapes the golden-render error message; it defaults to 0 (the sentinel default) for the checkDefaults path.
+  function promptGate(key: string, value: PromptPayload, version = 0): GateResult {
+    const failures: string[] = [];
+    const unknown = unknownPlaceholders(key, value.text);
+    if (unknown.length) {
+      const valid = knownPlaceholders(key).map((p) => `{{${p}}}`).join(", ") || "(none)";
+      failures.push(`unknown placeholder(s) ${unknown.map((p) => `{{${p}}}`).join(", ")} would fail at render (valid for this key: ${valid})`);
+    }
+    const evalResult = evalPromptVersion(key, value.text, version);
+    if (!evalResult.passed) failures.push(`eval gate failed over ${evalResult.goldenCount} golden input(s): ${evalResult.failures.join("; ")}`);
+    return { passed: failures.length === 0, failures };
+  }
+
   return {
     core,
     resolvePin,
@@ -225,23 +248,7 @@ export function createPromptStore(opts: PromptStoreOptions): PromptStore {
     addPromptVersion: (key, text, o = {}) => core.addVersion(key, { text, config: o.config }, { by: o.by, note: o.note }),
     // Gated promote: refuse an unknown placeholder OR a golden-render eval failure, so a broken edit sits inactive.
     promote: (key, version, o = {}) =>
-      core.promote(key, version, {
-        label: o.label,
-        by: o.by,
-        note: o.note,
-        refs: o.refs,
-        gate: (value) => {
-          const failures: string[] = [];
-          const unknown = unknownPlaceholders(key, value.text);
-          if (unknown.length) {
-            const valid = knownPlaceholders(key).map((p) => `{{${p}}}`).join(", ") || "(none)";
-            failures.push(`unknown placeholder(s) ${unknown.map((p) => `{{${p}}}`).join(", ")} would fail at render (valid for this key: ${valid})`);
-          }
-          const evalResult = evalPromptVersion(key, value.text, version);
-          if (!evalResult.passed) failures.push(`eval gate failed over ${evalResult.goldenCount} golden input(s): ${evalResult.failures.join("; ")}`);
-          return { passed: failures.length === 0, failures };
-        },
-      }),
+      core.promote(key, version, { label: o.label, by: o.by, note: o.note, refs: o.refs, gate: (value) => promptGate(key, value, version) }),
     listVersions: (key) => core.listVersions(key),
     listKeys: () => core.listKeys(),
     getPromptText: async (key, version) => {
@@ -251,5 +258,8 @@ export function createPromptStore(opts: PromptStoreOptions): PromptStore {
     ensureIndexes: () => core.ensureIndexes(),
     seedDefaults: () => core.seedDefaults(),
     revertToCodeDefault: (key, o = {}) => core.revertToCodeDefault(key, o),
+    // Run every code default through the SAME gate `promote` uses; the report says whether each default could
+    // itself go live. The caller decides the policy (throw at boot, warn) on report.ok.
+    checkDefaults: () => core.checkDefaults((key, value) => promptGate(key, value)),
   };
 }

@@ -15,6 +15,7 @@ import { z } from "zod";
 import {
   createVersionedStore,
   VersionedStoreError,
+  type DefaultsHealthReport,
   type KeySummary,
   type StoreEvent,
   type VersionedStore,
@@ -280,6 +281,12 @@ export interface ScaffoldStore<T extends ScaffoldSpecLike, R = unknown> {
   ensureIndexes(): Promise<void>;
   seedDefaults(): Promise<Array<{ key: string; seeded: boolean }>>;
   syncDefaults(): Promise<Array<{ key: string; action: "seeded" | "updated" | "unchanged" }>>;
+  /**
+   * Run every code-default spec through the SAME deterministic gate `promote` uses (pinning + placeholder
+   * binding + executable allowlist + mode/key coherence) and return a report: whether each default could
+   * itself go live. The policy on a failure (throw at boot, warn) is the caller's.
+   */
+  checkDefaults(): Promise<DefaultsHealthReport>;
   /** The underlying generic store, if you need core verbs directly. */
   core: VersionedStore<T>;
 }
@@ -379,5 +386,8 @@ export function createScaffoldStore<T extends ScaffoldSpecLike, R = unknown>(
     ensureIndexes: () => core.ensureIndexes(),
     seedDefaults: () => core.seedDefaults(),
     syncDefaults: () => core.syncDefaults(),
+    // Run every code default through the SAME gate `promote` uses; the report says whether each default could
+    // itself go live. The caller decides the policy (throw at boot, warn) on report.ok.
+    checkDefaults: () => core.checkDefaults((key, value) => evalScaffoldSpec(key, value, schema, gateOpts)),
   };
 }

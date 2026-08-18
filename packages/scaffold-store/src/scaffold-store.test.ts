@@ -316,3 +316,21 @@ describe("hash stability", () => {
     assert.deepEqual({ ...reordered }, { ...VITE });
   });
 });
+
+describe("checkDefaults — every code default runs through the deterministic gate", () => {
+  it("ok=true when every default passes; ok=false and names a floating-tag default", async () => {
+    const good = createScaffoldStore({ backend: createInMemoryBackend(), defaults: { [VITE.key]: VITE } });
+    assert.equal((await good.checkDefaults()).ok, true);
+
+    // A default that would itself be REFUSED at promote (a floating @latest tag on a networked command).
+    const badSpec: BaseScaffoldSpec = {
+      ...VITE,
+      key: "web.frontend.bad",
+      scaffold: { ...VITE.scaffold, command: "npm create vite@latest {dir}" },
+    };
+    const bad = createScaffoldStore({ backend: createInMemoryBackend(), defaults: { [badSpec.key]: badSpec } });
+    const report = await bad.checkDefaults();
+    assert.equal(report.ok, false);
+    assert.match(report.results.find((r) => r.key === badSpec.key)?.failures.join(" ") ?? "", /floating tag/);
+  });
+});

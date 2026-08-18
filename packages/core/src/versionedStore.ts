@@ -38,6 +38,26 @@ export interface GateResult {
 /** An eval-gate hook run at promote time. Sync (deterministic tier) or async (golden-output / LLM-judge, M6). */
 export type Gate<T> = (value: T) => GateResult | Promise<GateResult>;
 
+/**
+ * A per-key gate for `checkDefaults`. Unlike `Gate<T>` (used at promote, where the key is already fixed),
+ * this takes the key alongside the value, because a domain's gate is per-key (what makes one key's default
+ * valid says nothing about another's). Sync or async, mirroring `Gate<T>`.
+ */
+export type DefaultsGate<T> = (key: string, value: T) => GateResult | Promise<GateResult>;
+
+/** One key's result in a defaults-health report. */
+export interface DefaultCheck {
+  key: string;
+  passed: boolean;
+  failures: string[];
+}
+
+/** The report from `checkDefaults`: whether every registered default passed its gate, plus the per-key detail. */
+export interface DefaultsHealthReport {
+  ok: boolean;
+  results: DefaultCheck[];
+}
+
 export interface VersionInfo {
   version: number;
   sha256: string;
@@ -118,6 +138,15 @@ export interface VersionedStore<T> {
    * it over `syncDefaults()` (reverts every key) and over `promote(key, 0)` (0 is the sentinel, not stored).
    */
   revertToCodeDefault(key: string, opts?: { by?: string; note?: string; label?: string }): Promise<number>;
+  /**
+   * Run `gate` over every registered code default and return a report. Pure: reads only the in-code defaults,
+   * touches no backend, emits no event, never throws. This verifies the FALLBACK-SOUNDNESS assumption the
+   * store leans on: a code default is served on every `resolve` fallback AND is the value `revertToCodeDefault`
+   * re-promotes, so it must be able to pass the same gate a candidate version must. The POLICY on an unhealthy
+   * default (throw at boot, warn, degrade) is the CALLER's; inspect `report.ok`. Complements `codeDefault(key)`
+   * (one value) by verifying they are all gate-valid.
+   */
+  checkDefaults(gate: DefaultsGate<T>): Promise<DefaultsHealthReport>;
 }
 
 /**
@@ -338,5 +367,14 @@ export function createVersionedStore<T>(cfg: VersionedStoreConfig<T>, backend: V
     return out;
   }
 
-  return { resolve, getVersion, getActiveVersion, addVersion, promote, revertToCodeDefault, listVersions, listKeys, ensureIndexes, seedDefaults, syncDefaults, codeDefault };
+  async function checkDefaults(gate: DefaultsGate<T>): Promise<DefaultsHealthReport> {
+    const results: DefaultCheck[] = [];
+    for (const [key, value] of Object.entries(cfg.defaults)) {
+      const r = await gate(key, value);
+      results.push({ key, passed: r.passed, failures: r.failures });
+    }
+    return { ok: results.every((r) => r.passed), results };
+  }
+
+  return { resolve, getVersion, getActiveVersion, addVersion, promote, revertToCodeDefault, listVersions, listKeys, ensureIndexes, seedDefaults, syncDefaults, codeDefault, checkDefaults };
 }

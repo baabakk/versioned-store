@@ -153,3 +153,31 @@ describe("var-schema detection is structural (survives a duplicated zod) — TD-
     assert.deepEqual(store.unknownPlaceholders("s", "x {{y}}"), []);
   });
 });
+
+describe("checkDefaults — every code default runs through the promote gate", () => {
+  test("ok=true when every code default is gate-valid", async () => {
+    const s = createPromptStore({
+      backend: createInMemoryBackend(),
+      defaults: { greeting: { text: "Hello, {{name}}!" } },
+      varSchemas: { greeting: z.object({ name: z.string() }) },
+      goldens: { greeting: [{ name: "World" }] },
+    });
+    const report = await s.checkDefaults();
+    assert.equal(report.ok, true);
+    assert.equal(report.results.find((r) => r.key === "greeting")?.passed, true);
+  });
+
+  test("ok=false and names the key when a default has an unknown placeholder (the SAME gate promote uses)", async () => {
+    const s = createPromptStore({
+      backend: createInMemoryBackend(),
+      defaults: { bad: { text: "Hi {{oops}}" } },
+      varSchemas: { bad: z.object({ name: z.string() }) }, // {{oops}} is not in the schema
+      goldens: { bad: [{ name: "x" }] },
+    });
+    const report = await s.checkDefaults();
+    assert.equal(report.ok, false);
+    const r = report.results.find((x) => x.key === "bad");
+    assert.ok(r && !r.passed);
+    assert.match(r.failures.join(" "), /unknown placeholder/);
+  });
+});
