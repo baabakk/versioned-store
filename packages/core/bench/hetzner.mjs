@@ -172,8 +172,13 @@ try {
 
   console.log(`\nwaiting for benchmarks (cloud-init installs Node, then npm installs ${PKG}) ...`);
   const deadline = Date.now() + 20 * 60 * 1000;
+  // The identity file is REQUIRED, not optional: the instances were created with a specific Hetzner SSH key,
+  // and plain `ssh` would offer the agent's default key instead, fail to authenticate, and silently poll until
+  // the deadline. The run would then destroy the instances having collected nothing, which is the worst
+  // outcome available: full cost, no data. --identity defaults to the key this benchmark generates.
+  const identity = String(flag("identity", `${process.env.HOME ?? process.env.USERPROFILE}/.ssh/vs_bench_hetzner`));
   const ssh = (ip, cmd) =>
-    execFileSync("ssh", ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=8", `root@${ip}`, cmd], {
+    execFileSync("ssh", ["-i", identity, "-o", "StrictHostKeyChecking=no", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=8", `root@${ip}`, cmd], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     });
