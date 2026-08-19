@@ -16,9 +16,12 @@
 
 import {
   VersionedStoreError,
+  type DefaultsGate,
   type DefaultsHealthReport,
   type KeySummary,
   type Resolved,
+  type SeedResult,
+  type SyncResult,
   type VersionInfo,
   type VersionedStore,
 } from "@versioned-store/core";
@@ -53,6 +56,13 @@ export interface StoreDescriptor<T> {
   checkDefaults(): Promise<DefaultsHealthReport>;
   /** Parse a single CLI string argument into a payload for `add`. Throw a clear message on malformed input. */
   parsePayload(raw: string): T;
+  /**
+   * Optional per-key gate. When supplied, `seed` and `sync` verify each code default through it before
+   * promoting (verify-on-seed): an unsound default is refused, not made active. Facade-backed descriptors can
+   * leave this off (their own `seedDefaults` already gates); a core-direct descriptor should pass its gate here
+   * so the operator `seed`/`sync` verbs cannot promote an unsound default either.
+   */
+  gate?: DefaultsGate<T>;
   /** Pretty-print a payload for `diff` (default: pretty JSON). */
   renderForDiff?(value: T): string;
   /** Flush the audit sink before the runner closes the backend (wire a `createDrainableSink().drain`). */
@@ -77,8 +87,8 @@ export interface CliCommand {
   add(key: string, raw: string, opts: { by?: string; note?: string }): Promise<number>;
   promote(key: string, version: number, opts: { by?: string; note?: string; label?: string }): Promise<void>;
   revert(key: string, opts: { by?: string; note?: string }): Promise<number>;
-  seed(): Promise<Array<{ key: string; seeded: boolean }>>;
-  sync(): Promise<Array<{ key: string; action: "seeded" | "updated" | "unchanged" }>>;
+  seed(): Promise<SeedResult[]>;
+  sync(): Promise<SyncResult[]>;
   health(): Promise<DefaultsHealthReport>;
   ensureIndexes(): Promise<void>;
   /** Await the domain's audit-sink writes. A no-op when the descriptor wired no drain. */
@@ -106,8 +116,8 @@ export function makeDescriptor<T>(d: StoreDescriptor<T>): CliCommand {
     add: (key, raw, opts) => d.store.addVersion(key, d.parsePayload(raw), opts),
     promote: (key, version, opts) => d.promote(key, version, opts),
     revert: (key, opts) => d.store.revertToCodeDefault(key, opts),
-    seed: () => d.store.seedDefaults(),
-    sync: () => d.store.syncDefaults(),
+    seed: () => d.store.seedDefaults(d.gate ? { gate: d.gate } : undefined),
+    sync: () => d.store.syncDefaults(d.gate ? { gate: d.gate } : undefined),
     health: () => d.checkDefaults(),
     ensureIndexes: () => d.store.ensureIndexes(),
     drain: () => d.drain?.() ?? Promise.resolve(),
@@ -318,19 +328,27 @@ export function createStoreCli(opts: StoreCliOptions): StoreCli {
 
   async function verbSeedSync(p: ParsedArgs, which: "seed" | "sync"): Promise<number> {
     const targets = p.domain ? [selectOne(p.domain)] : commands;
+    let refusedAny = false;
     for (const c of targets) {
       if (which === "seed") {
         const res = await c.seed();
         const seeded = res.filter((r) => r.seeded).length;
-        out(`[${c.domain}] seeded ${seeded}/${res.length} key(s) (${res.length - seeded} already present)`);
+        const refused = res.filter((r) => r.refused);
+        out(`[${c.domain}] seeded ${seeded}/${res.length} key(s) (${res.length - seeded - refused.length} already present, ${refused.length} refused)`);
+        for (const r of refused) out(`  x refused "${r.key}": ${(r.failures ?? []).join("; ")}`);
+        if (refused.length) refusedAny = true;
       } else {
         const res = await c.sync();
-        const counts = { seeded: 0, updated: 0, unchanged: 0 };
+        const counts = { seeded: 0, updated: 0, unchanged: 0, refused: 0 };
         for (const r of res) counts[r.action] += 1;
-        out(`[${c.domain}] sync: seeded=${counts.seeded} updated=${counts.updated} unchanged=${counts.unchanged}`);
+        out(`[${c.domain}] sync: seeded=${counts.seeded} updated=${counts.updated} unchanged=${counts.unchanged} refused=${counts.refused}`);
+        for (const r of res) if (r.action === "refused") out(`  x refused "${r.key}": ${(r.failures ?? []).join("; ")}`);
+        if (counts.refused) refusedAny = true;
       }
     }
-    return 0;
+    // A refused default is an unsound code default the seed/sync would otherwise have promoted. Exit non-zero
+    // so an operator or a CI step that runs `seed`/`sync` fails loudly rather than silently leaving it unseeded.
+    return refusedAny ? 1 : 0;
   }
 
   async function verbHealth(p: ParsedArgs): Promise<number> {

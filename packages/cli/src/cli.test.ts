@@ -42,6 +42,7 @@ function makeDomain(domain: string, defaults: Record<string, string>) {
     promote: gatedPromote,
     checkDefaults: () => store.checkDefaults(gate),
     parsePayload: (raw) => raw,
+    gate, // verify-on-seed: the CLI seed/sync verbs gate each default through this
     renderForDiff: (v) => v,
     drain: () => sink.drain(),
   };
@@ -182,6 +183,25 @@ describe("@versioned-store/cli — lifecycle (TD-VS-15: the runner drains the au
     const code = await cli.run(["promote", "greet", "99"]); // version 99 does not exist -> throws -> exit 1
     assert.equal(code, 1);
     assert.equal(drained, true, "the drain ran in the finally even though the verb threw");
+  });
+});
+
+describe("@versioned-store/cli — verify-on-seed", () => {
+  it("seed refuses an unsound default (via the descriptor gate), reports it, and exits non-zero", async () => {
+    // "greet" is clean; "bad" contains BAD, which the harness gate refuses.
+    const domain = makeDomain("prompt", { greet: "hello", bad: "this is BAD" });
+    const { cli, out } = makeCli([domain.command]);
+
+    const code = await cli.run(["seed"]);
+    assert.equal(code, 1, "a refused default makes seed exit non-zero");
+    assert.ok(out.some((l) => /refused=?\s*1|1 refused/.test(l) || /refused "bad"/.test(l)), "the refusal is reported");
+    assert.ok(out.some((l) => /refused "bad"/.test(l) && /BAD/.test(l)));
+  });
+
+  it("seed exits 0 and seeds everything when all defaults are sound", async () => {
+    const domain = makeDomain("prompt", { greet: "hello", bye: "goodbye" });
+    const { cli } = makeCli([domain.command]);
+    assert.equal(await cli.run(["seed"]), 0);
   });
 });
 

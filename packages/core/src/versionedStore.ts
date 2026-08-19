@@ -61,6 +61,21 @@ export interface DefaultsHealthReport {
   results: DefaultCheck[];
 }
 
+/** One key's outcome from `seedDefaults`. `refused` is set (with `failures`) when a supplied gate rejected the default. */
+export interface SeedResult {
+  key: string;
+  seeded: boolean;
+  refused?: boolean;
+  failures?: string[];
+}
+
+/** One key's outcome from `syncDefaults`. `"refused"` (with `failures`) is set when a supplied gate rejected the default. */
+export interface SyncResult {
+  key: string;
+  action: "seeded" | "updated" | "unchanged" | "refused";
+  failures?: string[];
+}
+
 export interface VersionInfo {
   version: number;
   sha256: string;
@@ -158,10 +173,18 @@ export interface VersionedStore<T> {
   listVersions(key: string): Promise<VersionInfo[]>;
   listKeys(): Promise<KeySummary[]>;
   ensureIndexes(): Promise<void>;
-  /** Idempotent: for each code default not yet in the store, insert it as v1 and set active -> 1. */
-  seedDefaults(): Promise<Array<{ key: string; seeded: boolean }>>;
-  /** For each code default whose content differs from the active version (or is unseeded), add + promote. */
-  syncDefaults(): Promise<Array<{ key: string; action: "seeded" | "updated" | "unchanged" }>>;
+  /**
+   * Idempotent: for each code default not yet in the store, insert it as v1 and set active -> 1. Pass
+   * `opts.gate` to VERIFY each default before it is promoted (verify-on-seed): a default the gate rejects is
+   * skipped and reported with `refused: true`, never made active. Without a gate, every default is seeded
+   * (the pre-existing behavior).
+   */
+  seedDefaults(opts?: { gate?: DefaultsGate<T> }): Promise<SeedResult[]>;
+  /**
+   * For each code default whose content differs from the active version (or is unseeded), add + promote. Pass
+   * `opts.gate` to refuse an unsound default (reported as `action: "refused"`) instead of promoting it.
+   */
+  syncDefaults(opts?: { gate?: DefaultsGate<T> }): Promise<SyncResult[]>;
   /** The in-code default as a Resolved (sentinel version 0), or null when the key has no default. */
   codeDefault(key: string): Resolved<T> | null;
   /**
@@ -413,14 +436,27 @@ export function createVersionedStore<T>(cfg: VersionedStoreConfig<T>, backend: V
     await backend.init();
   }
 
-  async function seedDefaults(): Promise<Array<{ key: string; seeded: boolean }>> {
+  async function seedDefaults(opts: { gate?: DefaultsGate<T> } = {}): Promise<SeedResult[]> {
     await ensureIndexes();
-    const out: Array<{ key: string; seeded: boolean }> = [];
+    const out: SeedResult[] = [];
     for (const [key, value] of Object.entries(cfg.defaults)) {
       const exists = (await backend.maxVersion(key)) !== null;
       if (exists) {
         out.push({ key, seeded: false });
         continue;
+      }
+      // verify-on-seed: seed promotes the code default to the ACTIVE version, so an unsound default (one that
+      // cannot pass its own gate) would be made active unvalidated. When a gate is supplied, refuse it instead:
+      // skip the promote and report it. The key stays unseeded and its (still-unsound) default is served only
+      // via the fallback path, which the caller guards at boot with `checkDefaults`. The caller decides whether
+      // a refused default is fatal; seed never throws on one, so a single bad default cannot halt the seed.
+      if (opts.gate) {
+        const r = await opts.gate(key, value);
+        if (!r.passed) {
+          log.warn({ key, failures: r.failures }, "seedDefaults refused an unsound code default (not promoted to active)");
+          out.push({ key, seeded: false, refused: true, failures: r.failures });
+          continue;
+        }
       }
       const v = await addVersion(key, value, { by: "seed", note: "seeded from code default" });
       await promote(key, v, { by: "seed" });
@@ -429,22 +465,34 @@ export function createVersionedStore<T>(cfg: VersionedStoreConfig<T>, backend: V
     return out;
   }
 
-  async function syncDefaults(): Promise<Array<{ key: string; action: "seeded" | "updated" | "unchanged" }>> {
+  async function syncDefaults(opts: { gate?: DefaultsGate<T> } = {}): Promise<SyncResult[]> {
     await ensureIndexes();
-    const out: Array<{ key: string; action: "seeded" | "updated" | "unchanged" }> = [];
+    const out: SyncResult[] = [];
     for (const [key, value] of Object.entries(cfg.defaults)) {
       const wantSha = cfg.hash(validate(value));
       const active = await getActiveVersion(key);
+      if (active && active.sha256 === wantSha) {
+        out.push({ key, action: "unchanged" });
+        continue;
+      }
+      // Sync would add + promote the default (either seed a missing key or update a drifted one). Same
+      // verify-on-seed rule as above: refuse an unsound default rather than promote it to active.
+      if (opts.gate) {
+        const r = await opts.gate(key, value);
+        if (!r.passed) {
+          log.warn({ key, failures: r.failures }, "syncDefaults refused an unsound code default (not promoted to active)");
+          out.push({ key, action: "refused", failures: r.failures });
+          continue;
+        }
+      }
       if (!active) {
         const v = await addVersion(key, value, { by: "sync", note: "seeded from code default" });
         await promote(key, v, { by: "sync" });
         out.push({ key, action: "seeded" });
-      } else if (active.sha256 !== wantSha) {
+      } else {
         const v = await addVersion(key, value, { by: "sync", note: "synced from changed code default" });
         await promote(key, v, { by: "sync" });
         out.push({ key, action: "updated" });
-      } else {
-        out.push({ key, action: "unchanged" });
       }
     }
     return out;

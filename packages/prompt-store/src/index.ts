@@ -14,6 +14,7 @@ import {
   type DefaultsHealthReport,
   type GateResult,
   type KeySummary,
+  type SeedResult,
   type StoreCipher,
   type StoreEvent,
   type VersionedStore,
@@ -124,7 +125,13 @@ export interface PromptStore {
   listKeys(): Promise<KeySummary[]>;
   getPromptText(key: string, version?: number): Promise<{ version: number; text: string } | null>;
   ensureIndexes(): Promise<void>;
-  seedDefaults(): Promise<Array<{ key: string; seeded: boolean }>>;
+  /**
+   * Seed each unseeded code-default prompt as its first version. Verify-on-seed is ALWAYS on here: each default
+   * is run through the same promote-gate (unknown-placeholder + golden-render) before it is made active, so an
+   * unsound default prompt is refused (`refused: true`) rather than promoted. The policy on a refused default
+   * (fail boot, warn) is the caller's; inspect the report.
+   */
+  seedDefaults(): Promise<SeedResult[]>;
   /**
    * Run every code-default prompt through the SAME promote-gate (unknown-placeholder + golden-render) and
    * return a report: whether each default could itself go live. The fallback-soundness check the store's
@@ -271,7 +278,8 @@ export function createPromptStore(opts: PromptStoreOptions): PromptStore {
       return r ? { version: r.version, text: r.value.text } : null;
     },
     ensureIndexes: () => core.ensureIndexes(),
-    seedDefaults: () => core.seedDefaults(),
+    // Verify-on-seed: auto-inject the same gate promote uses, so seeding cannot make an unsound default active.
+    seedDefaults: () => core.seedDefaults({ gate: (key, value) => promptGate(key, value) }),
     revertToCodeDefault: (key, o = {}) => core.revertToCodeDefault(key, o),
     // Run every code default through the SAME gate `promote` uses; the report says whether each default could
     // itself go live. The caller decides the policy (throw at boot, warn) on report.ok.

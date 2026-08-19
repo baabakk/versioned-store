@@ -17,8 +17,10 @@ import {
   VersionedStoreError,
   type DefaultsHealthReport,
   type KeySummary,
+  type SeedResult,
   type StoreCipher,
   type StoreEvent,
+  type SyncResult,
   type VersionedStore,
   type VersionedStoreBackend,
   type VersionInfo,
@@ -289,8 +291,10 @@ export interface ScaffoldStore<T extends ScaffoldSpecLike, R = unknown> {
   listVersions(key: string): Promise<VersionInfo[]>;
   listKeys(): Promise<KeySummary[]>;
   ensureIndexes(): Promise<void>;
-  seedDefaults(): Promise<Array<{ key: string; seeded: boolean }>>;
-  syncDefaults(): Promise<Array<{ key: string; action: "seeded" | "updated" | "unchanged" }>>;
+  /** Seed each unseeded code-default spec as its first version. Verify-on-seed is ALWAYS on: a default that fails the promote-gate (pinning + binding + allowlist) is refused (`refused: true`), not made active. */
+  seedDefaults(): Promise<SeedResult[]>;
+  /** Add + promote each drifted or unseeded code-default spec. Verify-on-seed is ALWAYS on: an unsound default is reported `action: "refused"` instead of promoted. */
+  syncDefaults(): Promise<SyncResult[]>;
   /**
    * Run every code-default spec through the SAME deterministic gate `promote` uses (pinning + placeholder
    * binding + executable allowlist + mode/key coherence) and return a report: whether each default could
@@ -396,8 +400,9 @@ export function createScaffoldStore<T extends ScaffoldSpecLike, R = unknown>(
     listVersions: (key) => core.listVersions(key),
     listKeys: () => core.listKeys(),
     ensureIndexes: () => core.ensureIndexes(),
-    seedDefaults: () => core.seedDefaults(),
-    syncDefaults: () => core.syncDefaults(),
+    // Verify-on-seed: auto-inject the same gate promote uses, so seeding/sync cannot make an unsound spec active.
+    seedDefaults: () => core.seedDefaults({ gate: (key, value) => evalScaffoldSpec(key, value, schema, gateOpts) }),
+    syncDefaults: () => core.syncDefaults({ gate: (key, value) => evalScaffoldSpec(key, value, schema, gateOpts) }),
     // Run every code default through the SAME gate `promote` uses; the report says whether each default could
     // itself go live. The caller decides the policy (throw at boot, warn) on report.ok.
     checkDefaults: () => core.checkDefaults((key, value) => evalScaffoldSpec(key, value, schema, gateOpts)),

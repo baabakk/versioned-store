@@ -336,6 +336,30 @@ describe("checkDefaults — every code default runs through the deterministic ga
   });
 });
 
+describe("verify-on-seed: the facade auto-gates seedDefaults", () => {
+  it("refuses an unsound default spec (a floating @latest tag) and seeds the pinned one", async () => {
+    const badSpec: BaseScaffoldSpec = {
+      ...VITE,
+      key: "web.frontend.bad",
+      scaffold: { ...VITE.scaffold, command: "npm create vite@latest {dir}" },
+    };
+    const store = createScaffoldStore({
+      backend: createInMemoryBackend(),
+      defaults: { [VITE.key]: VITE, [badSpec.key]: badSpec },
+    });
+    const res = await store.seedDefaults();
+
+    assert.equal(res.find((r) => r.key === VITE.key)?.seeded, true);
+    const bad = res.find((r) => r.key === badSpec.key);
+    assert.equal(bad?.seeded, false);
+    assert.equal(bad?.refused, true);
+    assert.match((bad?.failures ?? []).join(" "), /floating tag/);
+    // the pinned default resolves to its stored v1; the refused one resolves to the sentinel code default
+    assert.equal((await store.core.resolve(VITE.key))?.version, 1);
+    assert.equal((await store.core.resolve(badSpec.key))?.version, 0);
+  });
+});
+
 describe("cipher passthrough (TD-VS-11): the at-rest cipher reaches the core through the facade", () => {
   it("encrypts the stored spec but resolves the plaintext spec", async () => {
     const backend = createInMemoryBackend();

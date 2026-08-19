@@ -183,6 +183,27 @@ describe("checkDefaults — every code default runs through the promote gate", (
   });
 });
 
+describe("verify-on-seed: the facade auto-gates seedDefaults", () => {
+  test("refuses an unsound default prompt (unknown placeholder), seeds the clean one, never promotes the bad one", async () => {
+    const s = createPromptStore({
+      backend: createInMemoryBackend(),
+      defaults: { greeting: { text: "Hello, {{name}}!" }, bad: { text: "Hi {{oops}}" } },
+      varSchemas: { greeting: z.object({ name: z.string() }), bad: z.object({ name: z.string() }) },
+      goldens: { greeting: [{ name: "World" }], bad: [{ name: "x" }] },
+    });
+    const res = await s.seedDefaults();
+
+    assert.equal(res.find((r) => r.key === "greeting")?.seeded, true);
+    const bad = res.find((r) => r.key === "bad");
+    assert.equal(bad?.seeded, false);
+    assert.equal(bad?.refused, true);
+    assert.match((bad?.failures ?? []).join(" "), /unknown placeholder/);
+
+    assert.equal((await s.resolvePin("greeting")).version, 1); // clean default promoted
+    assert.equal((await s.resolvePin("bad")).version, 0); // unsound default NOT promoted; served via fallback only
+  });
+});
+
 describe("cipher passthrough (TD-VS-11): the at-rest cipher reaches the core through the facade", () => {
   test("encrypts the stored prompt text but resolves + renders plaintext", async () => {
     const backend = createInMemoryBackend();
