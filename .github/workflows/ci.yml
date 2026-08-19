@@ -94,6 +94,28 @@ jobs:
       - name: Live conformance against real Postgres + Mongo + Redis
         run: npm run test:live -w @versioned-store/core
 
+  bench-smoke:
+    # A SMOKE only: proves the resolve-latency harness stays runnable and does not crash (e.g. a pathological
+    # regression that hangs or throws). It does NOT publish numbers — a shared CI runner is too noisy to publish
+    # a latency the next run contradicts, so the published numbers come from a documented run on fixed hardware
+    # (bench/RESULTS.md). BENCH_QUICK trims the iteration counts so the smoke is fast.
+    name: Benchmark smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Benchmark (quick smoke; must not crash)
+        run: npm run bench -w @versioned-store/core
+        env:
+          BENCH_QUICK: "1"
+
   engines:
     # `engines: {"node": ">=18"}` is a promise that `import "@versioned-store/core"` works on Node 18. It is
     # only true while the barrel's import graph never reaches node:sqlite / pg / mongodb, which are subpath
