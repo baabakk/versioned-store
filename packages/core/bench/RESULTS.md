@@ -31,7 +31,7 @@ grows from 16 bytes to 20 KB.
 | AWS EC2 `c7g.large` | Graviton3 | 2.67 | 8.11 | 69.27 |
 | AWS EC2 `c7i.large` | Intel Xeon Platinum 8488C (Sapphire Rapids) | 3.55 | 9.01 | 57.95 |
 | Hetzner `CX23` (shared vCPU) | Intel Xeon Skylake | 3.78 | 18.54 | 241.42 |
-| **Android phone, Termux, Node 26** | **arm64 handset** | **10.21** | 23.44 | 144.32 |
+| **Android phone, Termux, Node 26** | **Snapdragon 8+ Gen 1** | **10.21** | 23.44 | 144.32 |
 | Laptop, Windows 11 (see caveat) | Intel i7-1270P | 13.0 | 26.5 | 673.7 |
 
 SQLite is not listed for Lambda because that run measured the two backends a Lambda would realistically use:
@@ -48,6 +48,12 @@ rollback-capable configuration in **10.21 µs on a handset**, with a full percen
 | InMemory | 10.21 / 11.46 / 17.92 | 21.61 / 34.58 / 83.49 | 22.86 / 23.85 / 40.78 |
 | SQLite (`:memory:`) | 23.44 / 29.95 / 44.90 | 51.20 / 58.86 / 117.29 | 57.86 / 69.69 / 103.80 |
 | File | 144.32 / 761.56 / 905.11 | 296.93 / 423.23 / 495.47 | 339.64 / 373.07 / 422.34 |
+
+The handset is a **Snapdragon 8+ Gen 1** (SM8475, TSMC 4nm): one Cortex-X2 prime core at 3.2 GHz, three
+Cortex-A710 at 2.75 GHz, and four Cortex-A510 efficiency cores at 1.8 GHz. That tri-cluster layout matters for
+reading the row: the tight spread (a p99 of 17.92 µs against a p50 of 10.21 µs) says the scheduler kept the
+process on the prime or performance cores for the whole run. A migration onto an A510 mid-run would have
+widened the tail sharply, so this row represents the phone behaving well, not the phone at its worst.
 
 Two observations worth drawing out.
 

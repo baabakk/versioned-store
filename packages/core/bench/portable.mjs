@@ -19,7 +19,7 @@
 import os from "node:os";
 import { hrtime } from "node:process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -58,6 +58,35 @@ for (const spec of ["./dist/backends/sqlite.js", "@versioned-store/core/backends
 }
 
 // ── Device identification ──────────────────────────────────────────────────
+/**
+ * `os.cpus()[0].model` is reliable on x86 and frequently USELESS on ARM Linux, where it returns "unknown":
+ * observed on both an Android handset under Termux and an AWS Graviton3 instance. The kernel exposes the real
+ * identity elsewhere, so try those before giving up, otherwise the most interesting rows in a device matrix
+ * are the ones that cannot say what they ran on.
+ */
+function cpuModel() {
+  const reported = os.cpus()[0]?.model?.trim();
+  if (reported && reported.toLowerCase() !== "unknown") return reported;
+  // Android and many ARM boards name the SoC in the device tree.
+  for (const p of ["/sys/firmware/devicetree/base/model", "/proc/device-tree/model"]) {
+    try {
+      const v = readFileSync(p, "utf8").replace(/\0/g, "").trim();
+      if (v) return v;
+    } catch { /* not this one */ }
+  }
+  try {
+    const info = readFileSync("/proc/cpuinfo", "utf8");
+    // "model name" on x86; "Model"/"Hardware" on some ARM; otherwise reconstruct from the implementer/part
+    // pair, which is what actually identifies an ARM core (0x41 is Arm Ltd; 0xd40 is Neoverse-V1, and so on).
+    const named = info.match(/^(?:model name|Model|Hardware)\s*:\s*(.+)$/mi)?.[1]?.trim();
+    if (named) return named;
+    const impl = info.match(/^CPU implementer\s*:\s*(\S+)/mi)?.[1];
+    const part = info.match(/^CPU part\s*:\s*(\S+)/mi)?.[1];
+    if (impl && part) return `ARM implementer ${impl} part ${part}`;
+  } catch { /* not Linux, or no procfs */ }
+  return "unknown";
+}
+
 function deviceInfo() {
   const cpus = os.cpus();
   // Termux reports platform "android" on current Node; older builds report "linux" with a telltale PREFIX.
@@ -68,7 +97,7 @@ function deviceInfo() {
     arch: os.arch(),
     release: os.release(),
     node: process.version,
-    cpu: cpus[0]?.model?.trim() ?? "unknown",
+    cpu: cpuModel(),
     cpuCount: cpus.length,
     // A phone's reported clock is frequently meaningless (it is whatever the governor was doing at import),
     // so it is recorded but should not be compared across devices.
