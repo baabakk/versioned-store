@@ -39,6 +39,61 @@ jobs:
       - name: Test
         run: npm test
 
+  live-conformance:
+    # The EVIDENCE half of the storage-portability claim (TD-VS-01 / beta.0 gate #4). The `test` job runs the
+    # conformance suite on a single JS event loop, which CANNOT exhibit the multi-connection CAS race the
+    # immutability guarantee exists for. This job runs the SAME suite against REAL Postgres, Mongo, and Redis
+    # service containers, where insertVersion contention hits distinct connections and the unique-constraint
+    # conflict is genuine. store.live.test.ts is env-gated and namespaces every factory call to a self-dropping
+    # scratch space, so it runs only here and leaves no residue.
+    name: Live-backend conformance
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: vs
+          POSTGRES_PASSWORD: vs
+          POSTGRES_DB: vsconf
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vs -d vsconf"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      VS_LIVE_PG: postgres://vs:vs@localhost:5432/vsconf
+      VS_LIVE_MONGO: mongodb://localhost:27017
+      VS_LIVE_REDIS: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Live conformance against real Postgres + Mongo + Redis
+        run: npm run test:live -w @versioned-store/core
+
   engines:
     # `engines: {"node": ">=18"}` is a promise that `import "@versioned-store/core"` works on Node 18. It is
     # only true while the barrel's import graph never reaches node:sqlite / pg / mongodb, which are subpath
