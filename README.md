@@ -9,8 +9,9 @@ An embedded-first, storage-portable, immutable-versioned config primitive with a
 | [`@versioned-store/core`](packages/core) | The generic primitive: immutable versions, a movable label pointer, a code-default fallback, and a promote-gate, over any payload `T`. Backends: SQLite (`node:sqlite`), File, InMemory, Postgres, Mongo, Redis. Plus migration, signed portable bundles, canary/shadow with gate-driven auto-rollback, a CLI, and an exported conformance suite. |
 | [`@versioned-store/prompt-store`](packages/prompt-store) | A batteries-included **prompt store** built on the core: strict `{{placeholder}}` rendering, Zod var-schema validation, unknown-placeholder detection, and a deterministic golden-render promote-gate. |
 | [`@versioned-store/scaffold-store`](packages/scaffold-store) | A batteries-included **scaffold store** built on the core: strict `{placeholder}` command rendering, injected key routing, and a deterministic promote-gate over pinning, placeholder binding, and an executable allowlist. |
+| [`@versioned-store/cli`](packages/cli) | A descriptor-driven **operator surface**: one uniform verb set (`list` / `add` / `promote` / `revert` / `diff` / `seed` / `sync` / `health`) over every store domain, with the promote gated by construction and an audit-sink drain, so no consumer hand-rolls an admin surface. |
 
-The two domain packages are worked examples of the same shape: payload, rendering, and a domain gate on top; policy and storage below. Neither adds a mechanism to the core.
+The two domain packages are worked examples of the same shape: payload, rendering, and a domain gate on top; policy and storage below. Neither adds a mechanism to the core. `@versioned-store/cli` is tooling: it receives already-constructed stores and drives them, loading no backend driver of its own.
 
 ## The pitch, and the honest gap
 

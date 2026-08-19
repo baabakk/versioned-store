@@ -6,7 +6,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInMemoryBackend } from "./backends/memory.js";
+import { createFileBackend } from "./backends/file.js";
 import { createVersionedStore, type StoreCipher, type VersionedStoreConfig } from "./versionedStore.js";
 import { createAesGcmCipher } from "./cipher.js";
 import type { VersionedStoreBackend } from "./backend.js";
@@ -138,5 +142,23 @@ describe("field-level encryption at rest", () => {
     const cipherOn = createVersionedStore<Cfg>({ ...base, encryptedFields: ["opts"], cipher: createAesGcmCipher({ key: KEY }) }, backend);
     const resolved = await cipherOn.resolve("k");
     assert.equal(resolved?.version, 0, "non-string encrypted field -> fail closed to the code default");
+  });
+
+  it("survives a real serializing backend (File): ciphertext persists to disk and a COLD store decrypts it", async () => {
+    // InMemory keeps a structuredClone (strings pass through trivially); File serializes to disk and reads back,
+    // so this proves the cipher path is backend-agnostic through actual persistence, not just an in-process Map.
+    const dir = mkdtempSync(join(tmpdir(), "vstore-cipher-"));
+    const store = make(createFileBackend(dir), createAesGcmCipher({ key: KEY }));
+    const v = await store.addVersion("s1", { secret: "disk-secret", label: "prod" });
+    await store.promote("s1", v);
+    assert.deepEqual((await store.resolve("s1"))?.value, { secret: "disk-secret", label: "prod" });
+
+    // A fresh store over the SAME dir has an empty version cache, so this is a genuine cold read from disk.
+    const cold = make(createFileBackend(dir), createAesGcmCipher({ key: KEY }));
+    assert.equal((await cold.resolve("s1"))?.value.secret, "disk-secret");
+
+    // And the ciphertext really is on disk: a wrong-key cold store fails closed to the code default.
+    const wrong = make(createFileBackend(dir), createAesGcmCipher({ key: WRONG_KEY }));
+    assert.equal((await wrong.resolve("s1"))?.version, 0);
   });
 });

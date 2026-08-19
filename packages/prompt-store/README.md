@@ -37,6 +37,8 @@ await prompts.promote("greeting", v); // throws: {{unknown}} is not in the var s
 - **Arbitrary breadth** — need to version non-prompt config too? Use `@versioned-store/core` directly.
 - **Promotion audit + history:** pass an `onEvent` sink and every promote (ungated reverts and out-of-band scripts included) is captured at the source, so promotion history is queryable rather than reconstructed from logs.
 - **A single-key kill-switch:** `revertToCodeDefault(key)` returns one key to its in-code default, ungated, when a live version misbehaves.
+- **A defaults health check:** `checkDefaults()` verifies every code-default prompt can itself pass the promote-gate, so your fallback is never an unsound prompt.
+- **Encryption at rest (opt-in):** pass a `cipher` to keep stored prompts confidential at rest; the content hash and the golden-render gate stay over the plaintext.
 
 ## Audit and rollback
 
@@ -60,5 +62,35 @@ await prompts.revertToCodeDefault("greeting", { by: "ada", note: `regression in 
 ```
 
 The sink fires alongside the injected logger, and its errors are swallowed, so a failing audit sink never disrupts a promote or a resolve.
+
+## Checking your defaults
+
+The code-default prompt is served on every fallback and is what `revertToCodeDefault` re-promotes, so it must be able to pass the same gate a candidate must. `checkDefaults()` runs every default through the store's own promote-gate (unknown-placeholder + golden-render) and reports whether each could go live, without touching the backend:
+
+```ts
+const report = await prompts.checkDefaults();
+if (!report.ok) {
+  // report.results is [{ key, passed, failures }]; the policy (fail at boot, warn, degrade) is yours.
+  const bad = report.results.filter((r) => !r.passed).map((r) => r.key);
+  throw new Error(`unsound default prompts: ${bad.join(", ")}`);
+}
+```
+
+## Encryption at rest
+
+To keep a stored prompt confidential at rest (a prompt that embeds a sensitive value), pass a `cipher`. The store encrypts the payload fields after mapping and decrypts them before rendering; the content hash and the golden-render gate stay over the plaintext, so promotion behavior is unchanged. A zero-dependency AES-256-GCM cipher ships at `@versioned-store/core/cipher`:
+
+```ts
+import { createAesGcmCipher } from "@versioned-store/core/cipher";
+
+const prompts = createPromptStore({
+  backend,
+  defaults: { greeting: { text: "Hello, {{name}}!" } },
+  cipher: createAesGcmCipher({ key: myKey }), // 32-byte Buffer or its base64
+  encryptedFields: ["text"], // default: every field (text and config)
+});
+```
+
+This protects the backend at rest, not a live compromised process, and it is not a secrets manager. See [SECURITY.md](../../SECURITY.md) for the threat model and the migration path.
 
 `zod` is a peer dependency: bring your own copy, and any `zod@^3.23 || ^4` works. Var-schema fields are detected structurally (by the schema's `.shape`), not by `instanceof`, so validation and the unknown-placeholder gate work correctly even if your dependency tree happens to resolve more than one copy of zod. MIT.

@@ -124,6 +124,29 @@ await scaffolds.revertToCodeDefault(key, { by: "sre", note: "9.2.0 scaffold brok
 
 The sink fires alongside the injected logger, and its errors are swallowed, so a failing audit sink never disrupts a promote or a resolve.
 
+## Checking your defaults
+
+A code-default spec is served on every fallback and is what `revertToCodeDefault` re-promotes, so it must be able to pass the same gate a candidate must. `checkDefaults()` runs every default through the store's own promote-gate (pinning + binding + allowlist) and reports whether each could go live, without touching the backend:
+
+```ts
+const report = await scaffolds.checkDefaults();
+if (!report.ok) {
+  // report.results is [{ key, passed, failures }]; the policy (fail at boot, warn) is yours.
+}
+```
+
+## Encryption at rest
+
+To keep a stored spec confidential at rest, pass a `cipher`. The store encrypts the spec after mapping and decrypts it before use; the content hash and the promote-gate stay over the plaintext, so promotion behavior is unchanged. A zero-dependency AES-256-GCM cipher ships at `@versioned-store/core/cipher`:
+
+```ts
+import { createAesGcmCipher } from "@versioned-store/core/cipher";
+
+createScaffoldStore({ backend, defaults, cipher: createAesGcmCipher({ key: myKey }) }); // encryptedFields defaults to ["spec"]
+```
+
+This protects the backend at rest, not a live compromised process, and it is not a secrets manager. See [SECURITY.md](../../SECURITY.md).
+
 ## API
 
 | Member | Purpose |
@@ -136,6 +159,7 @@ The sink fires alongside the injected logger, and its errors are swallowed, so a
 | `addScaffoldVersion(key, spec, opts?)` | insert an immutable version |
 | `promote(key, version, opts?)` | gated label flip (deploy / rollback); `opts.note` / `opts.refs` annotate it for the audit trail |
 | `revertToCodeDefault(key, opts?)` | ungated single-key kill-switch: re-promote the in-code default and return its new version |
+| `checkDefaults()` | run every code-default spec through the promote-gate; report `{ ok, results }` (the fallback-soundness check) |
 | `listVersions` / `listKeys` / `seedDefaults` / `syncDefaults` / `ensureIndexes` | admin verbs |
 | `core` | the underlying `VersionedStore<T>` |
 
