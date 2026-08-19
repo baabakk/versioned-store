@@ -4,12 +4,17 @@
   "initialVersions": {
     "@versioned-store/core": "0.0.0",
     "@versioned-store/prompt-store": "0.0.0",
-    "@versioned-store/scaffold-store": "0.0.0"
+    "@versioned-store/scaffold-store": "0.0.0",
+    "@versioned-store/cli": "0.1.0-alpha.4"
   },
   "changesets": [
+    "check-defaults",
+    "cli-package",
     "core-promote-note-interface",
+    "drainable-sink",
     "error-brand-guard",
     "facades-promote-surface-passthrough",
+    "field-encryption",
     "initial-alpha",
     "promote-path-and-fixes",
     "structural-zod-detection"

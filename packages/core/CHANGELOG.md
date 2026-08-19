@@ -1,5 +1,37 @@
 # @versioned-store/core
 
+## 0.1.0-alpha.5
+
+### Minor Changes
+
+- bb49f9f: Add `checkDefaults(gate)` — verify the code defaults are gate-valid (the fallback-soundness check).
+
+  A code default is served on every `resolve` fallback AND is the value `revertToCodeDefault` re-promotes, so it must be able to pass the same eval-gate a candidate version must. Nothing enforced that before, and every consumer hand-rolled the loop.
+
+  - **Core:** a new `VersionedStore.checkDefaults(gate)` runs a supplied per-key gate over every registered default and returns `{ ok, results: [{ key, passed, failures }] }`. Pure: reads only the in-code defaults, touches no backend, emits no event, never throws. New exported types `DefaultsGate<T>`, `DefaultCheck`, `DefaultsHealthReport`. The gate is `(key, value)` because a domain's gate is per-key.
+  - **prompt-store / scaffold-store:** a zero-argument `checkDefaults()` that reuses each facade's OWN promote-gate (the placeholder + golden-render gate for prompts; the pinning + binding + allowlist gate for scaffolds), so the check and the promote can never drift.
+  - The POLICY on an unhealthy default (throw at boot, warn, degrade) stays the consumer's; the library only reports.
+
+  Additive; no breaking changes.
+
+- a83a4ba: Add `createDrainableSink(inner)` — make an async `onEvent` sink flushable before process exit.
+
+  `onEvent` is synchronous by contract, so a sink that persists to a networked store must detach its write. That is correct for a long-lived host and wrong for a short-lived one: a CLI closes its backend connection the instant the verb returns, and the detached write loses its session, so the audit row is never written (the `TD-VS-15` failure a downstream consumer hit: an events collection with zero rows).
+
+  `createDrainableSink(inner, { onError? })` returns `{ onEvent, drain }`. `inner` does the persistence and returns its promise; the wrapper detaches it (so the store never blocks) but tracks it, and `drain()` awaits every write scheduled so far. A sync throw or async rejection is caught and routed to `onError` (default: a warning), never rethrown, preserving the swallow-and-warn posture (an audit row must never break a kill switch). Wire `onEvent` at store construction and `await drain()` after the verb, before closing the backend.
+
+  Additive; zero new dependencies. Foundational for the `@versioned-store/cli` runner's connect → verb → drain → close lifecycle.
+
+- 94a0bd8: Add opt-in field-level encryption at rest.
+
+  A sensitive config value (an API secret embedded in a config blob) was stored plaintext in the backend. This adds an optional at-rest cipher without becoming a secrets manager (key storage, leasing, and rotation stay the host's).
+
+  - **core:** a `StoreCipher` interface (`encrypt`/`decrypt` over opaque strings, sync or async) plus `cipher?` and `encryptedFields?` on `VersionedStoreConfig`. The store encrypts named fields AFTER `toDoc` on write and decrypts them BEFORE `fromDoc` on read; `encryptedFields` defaults to every field `toDoc` emits, or names a subset to keep the rest queryable at rest. The content hash and the eval-gate stay over the PLAINTEXT value, so dedup, `syncDefaults` change-detection, and gating are all unchanged, and a randomized cipher carries no dedup penalty. Every unreadable case (wrong key, tampered ciphertext, a pre-cipher cleartext version) fails CLOSED to the code default.
+  - **core (`@versioned-store/core/cipher` subpath):** a ready-made `createAesGcmCipher({ key, aad? })` (AES-256-GCM over node:crypto, zero dependencies). Fresh random IV per record; output is `vsc1:<base64url(iv|tag|ciphertext)>`; `decrypt` verifies the GCM tag and throws on any tamper. The main entry stays free of an opinionated cipher.
+  - **prompt-store / scaffold-store:** `cipher?` and `encryptedFields?` threaded through both facades.
+
+  Additive; no breaking changes. Versions are immutable, so enabling the cipher protects future versions only: a version written before it stays cleartext and now fails to decrypt (fail-closed), so a clean migration enables the cipher, re-publishes, and then rotates the secret. Threat model: protects the backend at rest, NOT a live compromised process (which holds the key and the decrypted resolve cache).
+
 ## 0.1.0-alpha.4
 
 ### Patch Changes
