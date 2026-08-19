@@ -147,21 +147,28 @@ try {
   for (const c of chosen) {
     const name = `vs-bench-${c.type}-${Date.now().toString(36)}`;
     console.log(`creating ${name} ...`);
-    const { server } = await api("/servers", {
-      method: "POST",
-      body: JSON.stringify({
-        name,
-        server_type: c.type,
-        image,
-        location,
-        ssh_keys: [sshKey],
-        labels: { [LABEL_KEY]: LABEL_VALUE, type: c.type },
-        user_data: userData.replace("$(cat /root/type)", c.type),
-      }),
-    });
-    created.push({ ...c, id: server.id, name, ip: server.public_net.ipv4.ip });
-    console.log(`  ${name} -> ${server.public_net.ipv4.ip}`);
+    try {
+      const { server } = await api("/servers", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          server_type: c.type,
+          image,
+          location,
+          ssh_keys: [sshKey],
+          labels: { [LABEL_KEY]: LABEL_VALUE, type: c.type },
+          user_data: userData.replace("$(cat /root/type)", c.type),
+        }),
+      });
+      created.push({ ...c, id: server.id, name, ip: server.public_net.ipv4.ip });
+      console.log(`  ${name} -> ${server.public_net.ipv4.ip}`);
+    } catch (err) {
+      // One type being unavailable (capacity, or not offered in this location) must not abandon the whole
+      // sweep, and must not strand the instances already created. Report it and carry on with the rest.
+      console.error(`  SKIPPED ${c.type}: ${err.message.split("\n")[0]}`);
+    }
   }
+  if (created.length === 0) throw new Error("no instances could be created; nothing to benchmark");
 
   console.log(`\nwaiting for benchmarks (cloud-init installs Node, then npm installs ${PKG}) ...`);
   const deadline = Date.now() + 20 * 60 * 1000;
