@@ -76,6 +76,12 @@ export interface SyncResult {
   failures?: string[];
 }
 
+/**
+ * One row of a key's version history, as `listVersions` returns it (newest first). This is the admin/display
+ * view: it carries the version's identity and provenance but NOT its payload, so listing a key's history stays
+ * cheap regardless of how large the stored values are. `active` marks the version the movable label currently
+ * points at, which is what makes a history listing answer "what is live right now" without a second query.
+ */
 export interface VersionInfo {
   version: number;
   sha256: string;
@@ -85,6 +91,11 @@ export interface VersionInfo {
   active: boolean;
 }
 
+/**
+ * A one-line summary per key, as `listKeys` returns it: how many versions exist and which one is active.
+ * `activeVersion` is null when the key has no label pointing anywhere, which means the key is unseeded and
+ * `resolve` is serving its in-code default (the sentinel version 0) rather than a stored version.
+ */
 export interface KeySummary {
   key: string;
   activeVersion: number | null;
@@ -107,6 +118,31 @@ export interface StoreCipher {
   decrypt(ciphertext: string): string | Promise<string>;
 }
 
+/**
+ * The domain configuration for a store: everything that makes a generic versioned store into YOUR store.
+ *
+ * This is the one object a consumer authors. The core owns policy (resolve, label, fallback, cache, promote,
+ * seed) and the backend owns storage; everything domain-specific lives here and is injected, which is why the
+ * core has no `if (domain === ...)` branch anywhere.
+ *
+ * The three required mappings are the contract: `hash` gives a value its identity (used for version dedup and
+ * for `syncDefaults` change detection), and `toDoc` / `fromDoc` map the payload to and from the stored shape,
+ * so each domain KEEPS its exact on-disk layout and adopting the store needs no data migration. `fromDoc`
+ * returning null is the documented signal for a malformed stored value, which triggers a fallback rather than
+ * serving something the domain cannot vouch for.
+ *
+ * @example
+ * ```ts
+ * const cfg: VersionedStoreConfig<{ text: string }> = {
+ *   domain: "greeting",
+ *   defaults: { hello: { text: "Hello!" } },      // served on any fallback, and seeded as v1
+ *   hash: (v) => createHash("sha256").update(v.text).digest("hex"),
+ *   toDoc: (v) => ({ text: v.text }),             // the on-disk shape
+ *   fromDoc: (d) => (typeof d.text === "string" ? { text: d.text } : null), // null = malformed
+ * };
+ * const store = createVersionedStore(cfg, createSqliteBackend("./greetings.db"));
+ * ```
+ */
 export interface VersionedStoreConfig<T> {
   /** Short domain id for logs + fallback metrics (e.g. "prompt", "scaffold"). */
   domain: string;
@@ -159,6 +195,36 @@ export interface VersionedStoreConfig<T> {
   onEvent?: (event: StoreEvent) => void;
 }
 
+/**
+ * A versioned store over payload `T`: the object `createVersionedStore` returns and the surface a consumer
+ * uses. Its verbs divide into three groups.
+ *
+ * **Runtime (the hot path).** `resolve(key)` reads the movable label, then serves that version's value, falling
+ * back to the in-code default when the backend is unreachable, the key is unseeded, or a stored value fails to
+ * load. Immutable version CONTENT is cached forever (a version can never change), while the label pointer is
+ * read fresh on every resolve, so a promote takes effect immediately and a warm resolve still costs at most one
+ * pointer read.
+ *
+ * **Admin (the deploy path).** `addVersion` inserts a new immutable version without making it live;
+ * `promote` flips the label to an existing version and is where the eval-gate runs, so a candidate that fails
+ * its domain gate physically cannot go live. `revertToCodeDefault` is the single-key kill switch.
+ *
+ * **Lifecycle.** `seedDefaults` / `syncDefaults` reconcile the in-code defaults into the backend, and
+ * `checkDefaults` verifies those defaults could themselves pass the gate, which is the soundness check the
+ * fallback path depends on.
+ *
+ * @example
+ * ```ts
+ * const store = createVersionedStore(cfg, createSqliteBackend("./config.db"));
+ * await store.seedDefaults();                      // idempotent: code default becomes v1
+ *
+ * const v2 = await store.addVersion("hello", { text: "Hi there!" });   // staged, not live
+ * await store.promote("hello", v2, { gate: myGate });                  // refused if the gate fails
+ *
+ * const active = await store.resolve("hello");     // { version: 2, value: { text: "Hi there!" }, ... }
+ * await store.promote("hello", 1);                 // rollback: flip the label back
+ * ```
+ */
 export interface VersionedStore<T> {
   /** Run-time resolve: label -> version with code-default fallback (+ fallback alarm) + version cache. */
   resolve(key: string, label?: string): Promise<Resolved<T> | null>;

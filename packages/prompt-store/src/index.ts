@@ -62,15 +62,53 @@ export interface ResolvedPrompt {
   config?: Record<string, unknown>;
 }
 
+/**
+ * The outcome of rendering one candidate prompt over a key's golden inputs. `goldenCount` is how many input
+ * sets were rendered, and `failures` carries one entry per golden that threw, prefixed with its index so an
+ * author can tell WHICH input broke. A key with no registered goldens is still rendered once (over `{}`), so
+ * a template whose placeholders are all unbound can never slip through unexamined.
+ */
 export interface PromptEvalResult {
   passed: boolean;
   goldenCount: number;
   failures: string[];
 }
 
+/**
+ * Per-key Zod schema for a prompt's variables. It does double duty: `renderPinned` validates the caller's vars
+ * against it (a wrong shape fails loudly at the call site instead of silently leaving a placeholder unbound),
+ * and the promote-gate ENUMERATES its field names to catch a `{{placeholder}}` the schema will never supply.
+ * Use an object schema; only an object-like schema exposes the field names that second check needs.
+ */
 export type PromptVarSchemas = Record<string, z.ZodType>;
+
+/**
+ * Per-key golden input sets: the variable bindings the promote-gate renders each candidate over. These are
+ * fixtures, not assertions about model output. Rendering them proves the template still binds cleanly under
+ * the inputs it is expected to see, which is what turns "someone renamed a placeholder" from a production
+ * incident into a refused promote.
+ */
 export type PromptGoldens = Record<string, Array<Record<string, unknown>>>;
 
+/**
+ * Construction options for `createPromptStore`. Only `backend` is required; everything else layers capability
+ * on: `defaults` gives the store something to fall back to (and to seed from), `varSchemas` and `goldens` give
+ * the promote-gate something to check against, and the rest are operational knobs.
+ *
+ * `defaults`, `varSchemas`, and `goldens` are three maps keyed by the SAME prompt key. Keeping them aligned is
+ * what makes the gate meaningful: a key with a default but no schema and no goldens is still versioned and
+ * still promotable, it just has almost nothing for the gate to refuse it on.
+ *
+ * @example
+ * ```ts
+ * const opts: PromptStoreOptions = {
+ *   backend: createInMemoryBackend(),
+ *   defaults:   { greeting: { text: "Hello, {{name}}!" } },
+ *   varSchemas: { greeting: z.object({ name: z.string() }) },
+ *   goldens:    { greeting: [{ name: "World" }, { name: "" }] },
+ * };
+ * ```
+ */
 export interface PromptStoreOptions {
   /** The storage backend (from @versioned-store/core/backends/*). */
   backend: VersionedStoreBackend;
@@ -106,6 +144,24 @@ export interface PromptStoreOptions {
   defaultLabel?: string;
 }
 
+/**
+ * The prompt store handle: the run-time verbs (`resolvePin`, `renderPinned`, `renderPrompt`) alongside the
+ * admin verbs that move a key's history forward (`addPromptVersion`, `promote`, `revertToCodeDefault`).
+ *
+ * Recording a version and making it live are deliberately two calls. `addPromptVersion` always succeeds and
+ * always writes an immutable version, so an edit can be captured and reviewed; only `promote` flips the label,
+ * and only past the gate. That split is why a bad prompt can exist in the store without ever being served.
+ *
+ * @example
+ * ```ts
+ * // Given a store built by createPromptStore:
+ * // Pin once, render many times, so every call in a run provably used the SAME immutable version.
+ * const pin = await prompts.resolvePin("greeting");
+ * const first = prompts.renderPinned(pin, { name: "Ada" });
+ * const second = prompts.renderPinned(pin, { name: "Grace" });
+ * console.log({ version: pin.version, sha256: pin.sha256 }); // the two lines above are attributable to this
+ * ```
+ */
 export interface PromptStore {
   resolvePin(key: string, label?: string): Promise<ResolvedPrompt>;
   renderPinned(pin: ResolvedPrompt, vars?: Record<string, unknown>): string;
@@ -165,6 +221,41 @@ function zodObjectShape(schema: unknown): Record<string, unknown> | null {
   return null;
 }
 
+/**
+ * Build a prompt store over an injected backend.
+ *
+ * Construct it once at boot and share the handle: stored versions are immutable, so the resolve cache can
+ * never go stale, and every run-time path that can fail falls back to the in-code default rather than
+ * throwing. A backend outage therefore costs you the newest prompt, never the ability to render one, which is
+ * the whole reason the code default is a first-class input here instead of an afterthought.
+ *
+ * @param opts the backend, the code-default prompts, and the per-key var schemas and goldens the promote-gate
+ *   checks a candidate against. Only `backend` is required. See {@link PromptStoreOptions} for each field.
+ * @returns the store handle. Its `core` property exposes the generic versioned-store verbs for anything the
+ *   prompt-shaped surface does not cover.
+ *
+ * @example
+ * ```ts
+ * import { createInMemoryBackend } from "@versioned-store/core";
+ * import { createPromptStore } from "@versioned-store/prompt-store";
+ * import { z } from "zod";
+ *
+ * const prompts = createPromptStore({
+ *   backend: createInMemoryBackend(), // or SQLite / Postgres / Mongo / Redis / File from the core
+ *   defaults: { greeting: { text: "Hello, {{name}}!" } },
+ *   varSchemas: { greeting: z.object({ name: z.string() }) },
+ *   goldens: { greeting: [{ name: "World" }] },
+ * });
+ *
+ * await prompts.seedDefaults();
+ * await prompts.renderPrompt("greeting", { name: "Ada" }); // "Hello, Ada!"
+ *
+ * // A candidate referencing a variable the schema never supplies is recorded, then refused at the label
+ * // flip, so the live prompt stays on the version that works.
+ * const v = await prompts.addPromptVersion("greeting", "Hi {{name}}, from {{sender}}");
+ * await prompts.promote("greeting", v); // throws GateRejectedError: {{sender}} is unknown for this key
+ * ```
+ */
 export function createPromptStore(opts: PromptStoreOptions): PromptStore {
   const hash = opts.hash ?? defaultSha256;
   const varSchemas = opts.varSchemas ?? {};

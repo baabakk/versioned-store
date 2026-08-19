@@ -3,3 +3,6 @@ dist/
 
 # npm auth — never commit a token into the public repo (added 2026-07-17)
 .npmrc
+
+# Generated API docs (typedoc output; built by 'npm run docs'). Added 2026-08-19.
+docs-site/

@@ -54,6 +54,12 @@ export const BaseScaffoldSpecSchema = z
   })
   .strict();
 
+/**
+ * The TypeScript shape inferred from `BaseScaffoldSpecSchema`: the minimum every stored spec satisfies, and
+ * the store's default payload type. Use it directly when the base fields are all your pipeline needs. When you
+ * extend the schema, `z.infer<typeof MySpecSchema>` stays assignable to this, which is exactly what lets the
+ * gate keep enforcing the base contract underneath your own fields.
+ */
 export type BaseScaffoldSpec = z.infer<typeof BaseScaffoldSpecSchema>;
 
 /** The shape any spec type must be assignable to for the store and gate to work with it. */
@@ -103,6 +109,13 @@ export const DEFAULT_ALLOWED_EXECUTABLES = [
  */
 const FLOATING_TAGS = ["latest", "next", "canary", "beta", "rc", "dev", "nightly", "alpha"];
 
+/**
+ * Tunes the deterministic promote-gate. Every field has a working default, so a store that passes nothing
+ * still gets the full gate; set them to TIGHTEN (a host with a narrower threat model passes a shorter
+ * executable list, a host whose renderer binds more than `{dir}` widens `allowedVars`). Note that setting
+ * `requirePinnedCommand` to false is a genuine loosening: it re-admits the floating networked command, which
+ * is the specific defect that made versioning the spec worth doing.
+ */
 export interface ScaffoldGateOptions {
   /** Executables a command may invoke (checked against the first token). Default: DEFAULT_ALLOWED_EXECUTABLES. */
   allowedExecutables?: string[];
@@ -112,6 +125,13 @@ export interface ScaffoldGateOptions {
   requirePinnedCommand?: boolean;
 }
 
+/**
+ * The outcome of running the deterministic gate over one candidate spec. `failures` accumulates every problem
+ * found (key agreement, mode coherence, placeholder binding, executable allowlist, pinning) instead of
+ * stopping at the first, so a single run tells an author everything to fix rather than one thing per attempt.
+ * A spec that fails schema parsing is the one exception: every later check reads parsed fields, so there is
+ * nothing further to say about it.
+ */
 export interface ScaffoldEvalResult {
   passed: boolean;
   failures: string[];
@@ -268,6 +288,27 @@ export interface ScaffoldStoreOptions<T extends ScaffoldSpecLike, R = unknown> {
   gate?: ScaffoldGateOptions;
 }
 
+/**
+ * The scaffold store handle: routing and resolution on the run-time side (`keyFor`, `resolveFor`,
+ * `resolveScaffold`, `renderCommand`), the version lifecycle on the admin side (`addScaffoldVersion`,
+ * `promote`, `revertToCodeDefault`). `T` is your spec type (the base, or your extension of it); `R` is
+ * whatever the injected router accepts, so a caller holding a subsystem descriptor never has to know keys.
+ *
+ * The null return is the load-bearing difference from the prompt store. A missing scaffold is a normal
+ * outcome ("nothing here indicates a scaffolder, hand-roll this one"), not a failure, so the resolve verbs
+ * return null instead of throwing and the caller branches on it rather than catching.
+ *
+ * @example
+ * ```ts
+ * // Given a store built by createScaffoldStore:
+ * const spec = await scaffolds.resolveScaffold("web.frontend.react-vite");
+ * if (spec) {
+ *   run(scaffolds.renderCommand(spec, { dir: "packages/web" })); // strict binding: unbound {dir} throws
+ * } else {
+ *   materializeByHand("packages/web"); // null is routine, not an error path
+ * }
+ * ```
+ */
 export interface ScaffoldStore<T extends ScaffoldSpecLike, R = unknown> {
   /** Resolve the active spec for a key. Null means "no spec, hand-roll it", NOT an error. */
   resolveScaffold(key: string, label?: string): Promise<T | null>;
@@ -320,6 +361,54 @@ function defaultHash(spec: unknown): string {
   return createHash("sha256").update(stableJson(spec)).digest("hex");
 }
 
+/**
+ * Build a scaffold store over an injected backend.
+ *
+ * Construct it once at boot and share the handle: stored versions are immutable, so the resolve cache cannot
+ * go stale, and a resolve falls back to the in-code spec when the backend is unreachable or the key is
+ * unseeded. A store outage costs you the newest spec, never the ability to scaffold, which is why the code
+ * default is a first-class input here (`codeDefaultIsFirstClass`) rather than an alarm condition.
+ *
+ * @param opts the backend, the code-default specs, an optional `schema` (defaults to `BaseScaffoldSpecSchema`,
+ *   extend it to carry domain fields), an optional `keyFor` router, and `gate` to tune the promote-gate. Only
+ *   `backend` is required. See {@link ScaffoldStoreOptions} for each field.
+ * @returns the store handle. Its `core` property exposes the generic versioned-store verbs for anything the
+ *   scaffold-shaped surface does not cover.
+ *
+ * @example
+ * ```ts
+ * import { createInMemoryBackend } from "@versioned-store/core";
+ * import { createScaffoldStore } from "@versioned-store/scaffold-store";
+ *
+ * const key = "web.frontend.react-vite";
+ * const scaffolds = createScaffoldStore({
+ *   backend: createInMemoryBackend(), // or SQLite / Postgres / Mongo / Redis / File from the core
+ *   defaults: {
+ *     [key]: {
+ *       key,
+ *       scaffold: {
+ *         mode: "command",
+ *         command: "npm create vite@9.1.0 {dir} -- --template react-ts",
+ *         placement: "fresh",
+ *         network: true,
+ *       },
+ *       install: "npm install --include=dev",
+ *       build: "tsc -b",
+ *     },
+ *   },
+ * });
+ *
+ * await scaffolds.seedDefaults();
+ * const spec = await scaffolds.resolveScaffold(key);
+ * if (spec) run(scaffolds.renderCommand(spec, { dir: "packages/web" })); // null means hand-roll it
+ *
+ * // Bumping to a floating tag is recorded as a version, then refused at the label flip, so `active` stays
+ * // on the spec that reproduces.
+ * const floating = { ...spec!, scaffold: { ...spec!.scaffold, command: "npm create vite@latest {dir}" } };
+ * const v = await scaffolds.addScaffoldVersion(key, floating);
+ * await scaffolds.promote(key, v); // throws GateRejectedError: a networked scaffold must pin an exact version
+ * ```
+ */
 export function createScaffoldStore<T extends ScaffoldSpecLike, R = unknown>(
   opts: ScaffoldStoreOptions<T, R>,
 ): ScaffoldStore<T, R> {

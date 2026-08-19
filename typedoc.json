@@ -1,0 +1,22 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "versioned-store",
+  "entryPointStrategy": "packages",
+  "entryPoints": ["packages/core", "packages/prompt-store", "packages/scaffold-store", "packages/cli"],
+  "out": "docs-site",
+  "readme": "README.md",
+  "projectDocuments": ["docs/guide/consuming.md", "docs/guide/operating.md", "docs/guide/backends.md"],
+  "includeVersion": true,
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "categorizeByGroup": true,
+  "navigationLinks": {
+    "GitHub": "https://github.com/baabakk/versioned-store",
+    "npm": "https://www.npmjs.com/org/versioned-store"
+  },
+  "validation": {
+    "notExported": true,
+    "invalidLink": true,
+    "notDocumented": false
+  }
+}

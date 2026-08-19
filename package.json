@@ -17,9 +17,12 @@
     "changeset": "changeset",
     "changeset:version": "changeset version",
     "release:alpha": "npm run build && npm run typecheck && changeset publish && node scripts/retag-alpha.mjs",
-    "release:verify": "node scripts/retag-alpha.mjs --check"
+    "release:verify": "node scripts/retag-alpha.mjs --check",
+    "docs": "typedoc",
+    "docs:check": "typedoc --emit none"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.31.1"
+    "@changesets/cli": "^2.31.1",
+    "typedoc": "0.28.15"
   }
 }

@@ -94,6 +94,25 @@ jobs:
       - name: Live conformance against real Postgres + Mongo + Redis
         run: npm run test:live -w @versioned-store/core
 
+  docs:
+    # The API reference is generated from the TSDoc in the source, so it can only stay accurate if generating it
+    # is a gate. This fails on a broken {@link}, a documented symbol that is not actually exported, or a guide
+    # page that references something that moved. Cheap, and it keeps the published reference honest.
+    name: Docs build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate the API reference (validates links + exports)
+        run: npm run docs
+
   bench-smoke:
     # A SMOKE only: proves the resolve-latency harness stays runnable and does not crash (e.g. a pathological
     # regression that hangs or throws). It does NOT publish numbers — a shared CI runner is too noisy to publish

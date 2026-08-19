@@ -124,6 +124,11 @@ export function makeDescriptor<T>(d: StoreDescriptor<T>): CliCommand {
   };
 }
 
+/**
+ * Construction options for `createStoreCli`. Only `commands` is required; the rest adapt the runner to its
+ * host. `connect` and `close` bracket the verb with the host's own backend lifecycle, and `out` / `err` make
+ * the runner testable by redirecting its output away from the console.
+ */
 export interface StoreCliOptions {
   /**
    * One command per store domain (build each with `makeDescriptor`). Verbs that target a key resolve to a
@@ -146,8 +151,16 @@ export interface StoreCliOptions {
   actor?: () => string;
 }
 
+/**
+ * The runner `createStoreCli` returns. It has a single method by design: everything an operator can do is a
+ * verb in `argv`, so a host's bin file is a two-line adapter rather than a second place where policy lives.
+ */
 export interface StoreCli {
-  /** Parse argv (already sliced past node + script), run the verb, drain, close, and return an exit code. Never throws. */
+  /**
+   * Parse argv (already sliced past node + script), run the verb, drain, close, and return an exit code. Never
+   * throws: a usage error returns 2, a runtime failure (a refused promote, a missing version, a refused
+   * default) returns 1, and success returns 0, so the caller can `process.exit` on the result directly.
+   */
   run(argv: string[]): Promise<number>;
 }
 
@@ -196,6 +209,38 @@ function msg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/**
+ * Build the operator CLI runner over one or more store domains.
+ *
+ * The runner's lifecycle is connect, run the verb, DRAIN the audit sinks, then close, in that order. The drain
+ * step is why a promote's audit row survives in a short-lived process: a synchronous `onEvent` sink that
+ * persists asynchronously would otherwise lose its write when the backend closes microseconds later.
+ *
+ * Throws at construction on an empty command list or a duplicate domain name, because both are wiring mistakes
+ * that would otherwise surface as a confusing dispatch failure at 3am rather than at startup.
+ *
+ * @example
+ * ```ts
+ * // bin/store-admin.ts — the host's thin adapter
+ * const cli = createStoreCli({
+ *   commands: [
+ *     makeDescriptor({
+ *       domain: "prompt",
+ *       store: prompts.core,                       // ungated promote is not on this type
+ *       promote: prompts.promote,                  // the GATED promote
+ *       checkDefaults: () => prompts.checkDefaults(),
+ *       parsePayload: (raw) => ({ text: raw }),
+ *       drain: () => promptSink.drain(),
+ *     }),
+ *   ],
+ *   connect: () => openBackend(),
+ *   close: () => closeBackend(),
+ *   actor: () => process.env.USER ?? "store-admin",
+ * });
+ *
+ * process.exit(await cli.run(process.argv.slice(2)));
+ * ```
+ */
 export function createStoreCli(opts: StoreCliOptions): StoreCli {
   const out = opts.out ?? ((l: string) => console.log(l));
   const err = opts.err ?? ((l: string) => console.error(l));
