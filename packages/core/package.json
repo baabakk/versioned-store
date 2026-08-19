@@ -64,7 +64,8 @@
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "test:live": "node --import tsx --test \"src/store.live.test.ts\"",
     "bench": "node --import tsx bench/run.ts",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "bench:pack": "node bench/pack.mjs"
   },
   "peerDependencies": {
     "mongodb": "*",
