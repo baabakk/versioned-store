@@ -52,15 +52,22 @@ rollback-capable configuration in **10.21 µs on a handset**, with a full percen
 The handset is a **Snapdragon 8+ Gen 1** (SM8475, TSMC 4nm): one Cortex-X2 prime core at 3.2 GHz, three
 Cortex-A710 at 2.75 GHz, and four Cortex-A510 efficiency cores at 1.8 GHz. That tri-cluster layout matters for
 reading the row: the tight spread (a p99 of 17.92 µs against a p50 of 10.21 µs) says the scheduler kept the
-process on the prime or performance cores for the whole run. A migration onto an A510 mid-run would have
-widened the tail sharply, so this row represents the phone behaving well, not the phone at its worst.
+process on the prime or performance cores for the whole run.
+
+**This run was taken on a loaded device, not an idle one.** The handset was concurrently running a full
+workload including two LLM agents, and the laptop row below was likewise measured on a machine doing heavy
+work. Neither is a quiet-bench number. That makes both of them a FLOOR rather than a best case: the phone
+sustained a 10.21 µs median with a 17.92 µs p99 while genuinely contended for CPU, memory bandwidth, and
+thermal headroom.
 
 Two observations worth drawing out.
 
 The phone is **faster and more consistent than the Windows laptop** in this table (10.21 µs against 13.0 µs,
-with a p99 of 17.92 µs against 112.9 µs). That is not a claim that the handset has a faster CPU. It is a
-demonstration that at microsecond scale, what a machine is *doing* dominates what a machine *is*, which is the
-single most important caveat when reading any row here.
+with a p99 of 17.92 µs against 112.9 µs), and both machines were under real load at the time. That is not a
+claim that the handset has a faster CPU than the laptop. It is a demonstration that at microsecond scale, what
+a machine is *doing* dominates what a machine *is*, which is the single most important caveat when reading any
+row in this document. It is also why the published reference numbers come from dedicated cloud instances,
+where "what else is running" is a knowable quantity.
 
 And the same package, unmodified, ran on Lambda, on three EC2 instance families, on two Hetzner types, on a
 Windows laptop, and on an Android phone, from one npm install with no native build step. That portability is
@@ -120,8 +127,13 @@ them, and destroys everything in a `finally` block: `bench/ec2.mjs`, `bench/hetz
 
 ## Caveats, stated plainly
 
+**The laptop and phone rows were both measured under real background load,** including LLM agents running
+concurrently. They are deliberately not quiet-bench numbers, and should be read as a floor for what a
+contended consumer device delivers rather than as a measurement of the hardware's ceiling.
+
 **The laptop row is the noisiest and should not be used for comparison.** It was measured on a machine doing
-other work, on a hybrid P-core/E-core mobile CPU that throttles and reschedules across core types mid-run. Its
+heavy other work, on a hybrid P-core/E-core mobile CPU that throttles and reschedules across core types
+mid-run. Its
 p99 for InMemory is 112.9 µs against a p50 of 13 µs, and that spread is the machine, not the library. It is
 included precisely because it shows what an uncontrolled environment does to a microsecond-scale measurement,
 which is the reason the published numbers come from documented cloud instances instead.
