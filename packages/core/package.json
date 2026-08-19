@@ -36,6 +36,10 @@
       "types": "./dist/cli.d.ts",
       "import": "./dist/cli.js"
     },
+    "./cipher": {
+      "types": "./dist/cipher.d.ts",
+      "import": "./dist/cipher.js"
+    },
     "./backends/mongo": {
       "types": "./dist/backends/mongo.d.ts",
       "import": "./dist/backends/mongo.js"

@@ -14,6 +14,7 @@ import {
   type DefaultsHealthReport,
   type GateResult,
   type KeySummary,
+  type StoreCipher,
   type StoreEvent,
   type VersionedStore,
   type VersionedStoreBackend,
@@ -87,6 +88,18 @@ export interface PromptStoreOptions {
    * errors are swallowed, so a failing sink never disrupts a promote or a resolve.
    */
   onEvent?: (event: StoreEvent) => void;
+  /**
+   * Optional at-rest cipher for the stored prompt fields, applied AFTER toDoc and BEFORE fromDoc. The content
+   * hash and the golden-render gate stay over the plaintext text, so promotion behavior is unchanged. The
+   * built-in AES-256-GCM cipher is at `@versioned-store/core/cipher`. See `encryptedFields` to scope it.
+   */
+  cipher?: StoreCipher;
+  /**
+   * Which stored fields to encrypt when `cipher` is set. Prompt payloads map to `{ text, config }`, so the
+   * options are `["text"]`, `["config"]`, or both. Default (undefined): every field, i.e. both `text` and
+   * `config`.
+   */
+  encryptedFields?: string[];
   /** Content hash of the template text (default sha256 of the text). */
   hash?: (text: string) => string;
   defaultLabel?: string;
@@ -157,6 +170,8 @@ export function createPromptStore(opts: PromptStoreOptions): PromptStore {
       defaultLabel: opts.defaultLabel,
       backendAvailable: opts.backendAvailable,
       onEvent: opts.onEvent,
+      cipher: opts.cipher,
+      encryptedFields: opts.encryptedFields,
       defaults: opts.defaults ?? {},
       hash: (v) => hash(v.text),
       toDoc: (v) => ({ text: v.text, config: v.config }),

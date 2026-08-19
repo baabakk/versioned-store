@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { createInMemoryBackend, VersionedStoreError, type StoreEvent } from "@versioned-store/core";
+import { createAesGcmCipher } from "@versioned-store/core/cipher";
 import {
   BaseScaffoldSpecSchema,
   ScaffoldRenderError,
@@ -332,5 +333,25 @@ describe("checkDefaults — every code default runs through the deterministic ga
     const report = await bad.checkDefaults();
     assert.equal(report.ok, false);
     assert.match(report.results.find((r) => r.key === badSpec.key)?.failures.join(" ") ?? "", /floating tag/);
+  });
+});
+
+describe("cipher passthrough (TD-VS-11): the at-rest cipher reaches the core through the facade", () => {
+  it("encrypts the stored spec but resolves the plaintext spec", async () => {
+    const backend = createInMemoryBackend();
+    const store = createScaffoldStore({
+      backend,
+      defaults: { [VITE.key]: VITE },
+      cipher: createAesGcmCipher({ key: Buffer.alloc(32, 6) }),
+    });
+    await store.seedDefaults(); // seeds VITE as v1
+
+    const raw = await backend.getVersion(VITE.key, 1);
+    assert.ok(typeof raw?.spec === "string" && (raw.spec as string).startsWith("vsc1:"), "the stored spec is ciphertext");
+    assert.ok(!JSON.stringify(raw).includes("vite@9.1.0"), "no plaintext scaffold command leaked into the stored doc");
+
+    const resolved = await store.resolveScaffold(VITE.key);
+    assert.equal(resolved?.key, VITE.key);
+    assert.equal(resolved?.scaffold.command, VITE.scaffold.command);
   });
 });

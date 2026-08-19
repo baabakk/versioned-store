@@ -17,6 +17,7 @@ import {
   VersionedStoreError,
   type DefaultsHealthReport,
   type KeySummary,
+  type StoreCipher,
   type StoreEvent,
   type VersionedStore,
   type VersionedStoreBackend,
@@ -249,6 +250,15 @@ export interface ScaffoldStoreOptions<T extends ScaffoldSpecLike, R = unknown> {
    * a promote or a resolve.
    */
   onEvent?: (event: StoreEvent) => void;
+  /**
+   * Optional at-rest cipher for the stored spec, applied AFTER toDoc and BEFORE fromDoc. The content hash and
+   * the promote-gate stay over the plaintext spec, so promotion behavior is unchanged. The built-in AES-256-GCM
+   * cipher is at `@versioned-store/core/cipher`. Scaffold payloads nest under a single `spec` field, so
+   * `encryptedFields` is `["spec"]` or omitted (the default encrypts it).
+   */
+  cipher?: StoreCipher;
+  /** Which stored fields to encrypt when `cipher` is set. Default (undefined): every field, i.e. `spec`. */
+  encryptedFields?: string[];
   /** Content hash of a spec (default: sha256 of its stable JSON). */
   hash?: (spec: T) => string;
   defaultLabel?: string;
@@ -320,6 +330,8 @@ export function createScaffoldStore<T extends ScaffoldSpecLike, R = unknown>(
       defaultLabel: opts.defaultLabel,
       backendAvailable: opts.backendAvailable,
       onEvent: opts.onEvent,
+      cipher: opts.cipher,
+      encryptedFields: opts.encryptedFields,
       defaults: opts.defaults ?? {},
       hash,
       // The on-disk shape nests the spec under `spec`, matching the hand-written store this generalizes.

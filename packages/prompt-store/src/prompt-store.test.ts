@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { z } from "zod";
 import { createInMemoryBackend, VersionedStoreError, type StoreEvent } from "@versioned-store/core";
+import { createAesGcmCipher } from "@versioned-store/core/cipher";
 import { PromptNotFoundError, PromptRenderError, createPromptStore } from "./index.js";
 
 function makeStore() {
@@ -179,5 +180,27 @@ describe("checkDefaults — every code default runs through the promote gate", (
     const r = report.results.find((x) => x.key === "bad");
     assert.ok(r && !r.passed);
     assert.match(r.failures.join(" "), /unknown placeholder/);
+  });
+});
+
+describe("cipher passthrough (TD-VS-11): the at-rest cipher reaches the core through the facade", () => {
+  test("encrypts the stored prompt text but resolves + renders plaintext", async () => {
+    const backend = createInMemoryBackend();
+    const store = createPromptStore({
+      backend,
+      defaults: { greeting: { text: "Hello, {{name}}!" } },
+      varSchemas: { greeting: z.object({ name: z.string() }) },
+      goldens: { greeting: [{ name: "World" }] },
+      cipher: createAesGcmCipher({ key: Buffer.alloc(32, 5) }),
+    });
+    const v = await store.addPromptVersion("greeting", "Hi {{name}} from prod");
+    await store.promote("greeting", v);
+
+    const raw = await backend.getVersion("greeting", v);
+    assert.ok(typeof raw?.text === "string" && (raw.text as string).startsWith("vsc1:"), "the stored text is ciphertext");
+    assert.ok(!(raw!.text as string).includes("{{name}}"), "no plaintext template leaked into the stored doc");
+
+    const pin = await store.resolvePin("greeting");
+    assert.equal(store.renderPinned(pin, { name: "Ada" }), "Hi Ada from prod");
   });
 });

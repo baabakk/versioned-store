@@ -6,6 +6,9 @@ import { CasExhaustedError, GateRejectedError, KillSwitchNotSupportedError, Vers
 /** Max optimistic-CAS retries on the version bump before giving up (a hot-loop bound, never hit in practice). */
 const MAX_CAS_ATTEMPTS = 5;
 
+/** Doc keys the store owns (metadata). Everything else in a StoredDoc is a domain field from `toDoc`. */
+const RESERVED_DOC_KEYS = new Set(["key", "version", "sha256", "createdAtIso", "createdBy", "note"]);
+
 // ---------------------------------------------------------------------------
 // A generic, immutable-versioned, label-pointer store. This is the shared core the design (06 doc §12)
 // extracts from the two near-identical hand-written stores (prompts + scaffolds): the same resolve-by-label-
@@ -73,6 +76,22 @@ export interface KeySummary {
   versions: number;
 }
 
+/**
+ * An at-rest cipher for stored payload fields. The store applies it at the storage boundary ONLY: encrypt
+ * AFTER `toDoc` on write, decrypt BEFORE `fromDoc` on read. The content hash and the eval-gate stay over the
+ * PLAINTEXT value, so dedup and gating are unaffected and a randomized cipher (per-record IV) carries no dedup
+ * penalty. `encrypt`/`decrypt` operate on opaque strings; the store JSON-serializes each field value before
+ * encrypt and JSON-parses after decrypt, so any JSON payload field can be encrypted.
+ *
+ * Sync or async (`string | Promise<string>`), so a node:crypto cipher and a KMS cipher both fit. Threat model:
+ * this protects the backend AT REST; it does NOT protect a live compromised process (which holds the key and
+ * the decrypted resolve cache). It is not a secrets manager: key storage, leasing, and rotation stay the host's.
+ */
+export interface StoreCipher {
+  encrypt(plaintext: string): string | Promise<string>;
+  decrypt(ciphertext: string): string | Promise<string>;
+}
+
 export interface VersionedStoreConfig<T> {
   /** Short domain id for logs + fallback metrics (e.g. "prompt", "scaffold"). */
   domain: string;
@@ -93,6 +112,20 @@ export interface VersionedStoreConfig<T> {
   toDoc: (value: T) => Record<string, unknown>;
   /** Stored doc -> payload; return null when the doc is malformed/invalid (triggers a fallback). */
   fromDoc: (doc: Record<string, unknown>) => T | null;
+  /**
+   * Optional at-rest cipher for the stored doc fields. Applied AFTER `toDoc` on write and BEFORE `fromDoc` on
+   * read; the content hash and the eval-gate stay over the PLAINTEXT value (unchanged), so enabling it does not
+   * alter dedup, sync change-detection, or gating. See `StoreCipher`. Versions are immutable, so turning the
+   * cipher on protects FUTURE versions only; a version written without it is a cleartext version and will fail
+   * to decrypt (fail-closed to the code default). The built-in `createAesGcmCipher` is at `@versioned-store/core/cipher`.
+   */
+  cipher?: StoreCipher;
+  /**
+   * Which `toDoc` fields to encrypt. Names must match `toDoc`'s output keys. Default (undefined): every field
+   * `toDoc` emits. Name a subset to keep the rest queryable at rest (e.g. encrypt only the secret fields of a
+   * config blob). Ignored when `cipher` is not set.
+   */
+  encryptedFields?: string[];
   /** Optional validation applied before an insert (throws on invalid); used by add + seed + sync. */
   validate?: (value: T) => T;
   /**
@@ -188,8 +221,54 @@ export function createVersionedStore<T>(cfg: VersionedStoreConfig<T>, backend: V
     return cfg.validate ? cfg.validate(value) : value;
   }
 
-  function docToResolved(key: string, doc: StoredDoc): Resolved<T> | null {
-    const value = cfg.fromDoc(doc);
+  // Encrypt the configured (or all) domain fields of a toDoc output, in place on a copy. Each field value is
+  // JSON-serialized before encrypt so any JSON payload works; a listed field toDoc did not emit is skipped
+  // (there is nothing to encrypt). Called once per addVersion (the plaintext hash is computed separately).
+  async function encryptDomainFields(domainFields: Record<string, unknown>, cipher: StoreCipher): Promise<Record<string, unknown>> {
+    const names = cfg.encryptedFields ?? Object.keys(domainFields);
+    const out: Record<string, unknown> = { ...domainFields };
+    for (const name of names) {
+      // Nothing to encrypt when the field is absent or explicitly undefined (e.g. an omitted optional field);
+      // JSON.stringify(undefined) is undefined, not a string, so this also keeps the cipher from choking on it.
+      if (out[name] === undefined) continue;
+      out[name] = await cipher.encrypt(JSON.stringify(out[name]));
+    }
+    return out;
+  }
+
+  // Decrypt the configured (or all non-metadata) fields of a stored doc, returning a doc `fromDoc` can read, or
+  // null when a field cannot be recovered. A field written WITHOUT the cipher (a cleartext/pre-encryption
+  // version) is a non-string here, or fails auth on decrypt; either way we fail CLOSED (null -> the caller
+  // serves the code default) rather than hand `fromDoc` a value we cannot vouch for. Enabling the cipher
+  // protects future versions only, by design (versions are immutable).
+  async function decryptDocFields(doc: StoredDoc, cipher: StoreCipher): Promise<Record<string, unknown> | null> {
+    const names = cfg.encryptedFields ?? Object.keys(doc).filter((k) => !RESERVED_DOC_KEYS.has(k));
+    const out: Record<string, unknown> = { ...doc };
+    for (const name of names) {
+      const raw = out[name];
+      if (raw === undefined) continue;
+      if (typeof raw !== "string") {
+        log.warn({ key: doc.key, version: doc.version, field: name }, "encrypted field is not a ciphertext string (a pre-cipher version?); serving fallback");
+        return null;
+      }
+      try {
+        out[name] = JSON.parse(await cipher.decrypt(raw));
+      } catch (err) {
+        log.warn({ key: doc.key, version: doc.version, field: name, err: err instanceof Error ? err.message : String(err) }, "decrypt failed; serving fallback");
+        return null;
+      }
+    }
+    return out;
+  }
+
+  async function docToResolved(key: string, doc: StoredDoc): Promise<Resolved<T> | null> {
+    let source: Record<string, unknown> = doc;
+    if (cfg.cipher) {
+      const decrypted = await decryptDocFields(doc, cfg.cipher);
+      if (!decrypted) return null;
+      source = decrypted;
+    }
+    const value = cfg.fromDoc(source);
     if (value === null) return null;
     return { key, version: doc.version, sha256: doc.sha256 ?? cfg.hash(value), value };
   }
@@ -213,7 +292,7 @@ export function createVersionedStore<T>(cfg: VersionedStoreConfig<T>, backend: V
         emitFallback(key, "doc-missing", { alarm: !cfg.codeDefaultIsFirstClass, extra: { version: ptr.version } });
         return codeDefault(key);
       }
-      const resolved = docToResolved(key, doc);
+      const resolved = await docToResolved(key, doc);
       if (!resolved) {
         // A stored value failing validation is a real anomaly, so it always alarms (even for scaffolds).
         emitFallback(key, "schema-invalid", { extra: { version: ptr.version } });
@@ -229,7 +308,7 @@ export function createVersionedStore<T>(cfg: VersionedStoreConfig<T>, backend: V
 
   async function getVersion(key: string, version: number): Promise<Resolved<T> | null> {
     const doc = await backend.getVersion(key, version);
-    return doc ? docToResolved(key, doc) : null;
+    return doc ? await docToResolved(key, doc) : null;
   }
 
   async function getActiveVersion(key: string, label = DEFAULT_LABEL): Promise<Resolved<T> | null> {
@@ -240,6 +319,10 @@ export function createVersionedStore<T>(cfg: VersionedStoreConfig<T>, backend: V
 
   async function addVersion(key: string, value: T, opts: { by?: string; note?: string } = {}): Promise<number> {
     const v = validate(value);
+    // Map + (optionally) encrypt the domain fields ONCE, before the CAS loop: they do not depend on the version
+    // number, and re-encrypting per retry would only burn a fresh IV for nothing. The plaintext hash below is
+    // computed from `v`, not from these fields, so encryption never changes the version identity.
+    const storedFields = cfg.cipher ? await encryptDomainFields(cfg.toDoc(v), cfg.cipher) : cfg.toDoc(v);
     // Optimistic CAS on the version bump, backend-agnostic. The unique (key, version) constraint prevents
     // corruption; a concurrent writer who grabbed the same version makes the loser's insertVersion throw
     // BackendConflictError -> the loser re-reads maxVersion and retries, so addVersion is safe under concurrency
@@ -251,7 +334,7 @@ export function createVersionedStore<T>(cfg: VersionedStoreConfig<T>, backend: V
       const doc: StoredDoc = {
         key,
         version,
-        ...cfg.toDoc(v),
+        ...storedFields,
         sha256: cfg.hash(v),
         createdAtIso: new Date().toISOString(),
         createdBy: opts.by ?? "admin",
