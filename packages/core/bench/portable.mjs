@@ -28,17 +28,33 @@ const QUICK = args.includes("--quick");
 const labelIdx = args.indexOf("--label");
 const LABEL = labelIdx >= 0 ? args[labelIdx + 1] : "";
 
-// ── Load the core from the sibling dist ────────────────────────────────────
-const core = await import("./dist/index.js");
+// ── Load the core ──────────────────────────────────────────────────────────
+// Two supported shapes, tried in order, so one file works everywhere:
+//   1. the packed artifact  (a sibling dist/, copied to a phone or a laptop)
+//   2. the PUBLISHED package (npm i @versioned-store/core), which is what a throwaway cloud instance uses
+// Mode 2 is the more honest measurement of the two: it benchmarks exactly what a consumer installs, not a
+// local build that might differ.
+let core;
+let source;
+try {
+  core = await import("./dist/index.js");
+  source = "packed dist/";
+} catch {
+  core = await import("@versioned-store/core");
+  source = "npm @versioned-store/core";
+}
 const { createVersionedStore, createInMemoryBackend, createFileBackend } = core;
 
 // SQLite is a subpath and needs node:sqlite (Node 22+). Absent on older Node, which is a supported
 // configuration, not a failure: the main entry is Node 18 safe by design. Skip it and say so.
 let createSqliteBackend = null;
-try {
-  ({ createSqliteBackend } = await import("./dist/backends/sqlite.js"));
-} catch {
-  createSqliteBackend = null;
+for (const spec of ["./dist/backends/sqlite.js", "@versioned-store/core/backends/sqlite"]) {
+  try {
+    ({ createSqliteBackend } = await import(spec));
+    break;
+  } catch {
+    /* try the next shape, then give up and skip the backend */
+  }
 }
 
 // ── Device identification ──────────────────────────────────────────────────
@@ -170,6 +186,7 @@ const sizes = [
 
 console.log(`\nversioned-store portable benchmark`);
 console.log(`device : ${device.label}`);
+console.log(`core   : ${source}`);
 console.log(`system : ${device.platform}/${device.arch}, ${device.cpu} x${device.cpuCount}, ${device.totalMemGB} GB, node ${device.node}`);
 if (!createSqliteBackend) {
   console.log(`note   : node:sqlite unavailable (needs Node 22+), so the SQLite backend is skipped on this device`);
