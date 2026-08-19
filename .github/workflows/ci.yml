@@ -110,6 +110,12 @@ jobs:
 
       - run: npm ci
 
+      # Required: typedoc resolves the domain packages' cross-package types through the core's emitted
+      # .d.ts, so a docs run on a fresh checkout fails without a build first. It passes locally only
+      # because a developer's tree already has dist/ from an earlier build.
+      - name: Build
+        run: npm run build
+
       - name: Generate the API reference (validates links + exports)
         run: npm run docs
 
