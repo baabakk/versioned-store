@@ -55,6 +55,7 @@ The main entry is dependency-free and works on Node 18. Anything that needs a dr
 | `@versioned-store/core/backends/mongo` | `mongodb` |
 | `@versioned-store/core/conformance` | nothing |
 | `@versioned-store/core/cli` | `node:sqlite` (Node 22+) |
+| `@versioned-store/core/cipher` | nothing (`node:crypto`) |
 
 InMemory, File, and Redis (an injected client) are driver-free and export from the main entry.
 
@@ -149,6 +150,38 @@ Persisting the `promote-accepted` events is what lets you answer "which version 
 ```ts
 await store.revertToCodeDefault("greeting", { by: "oncall", note: "incident: bad promote" });
 ```
+
+## Checking your code defaults
+
+The in-code default is the store's safety net: it is served on every fallback and is the value `revertToCodeDefault` re-promotes, so it must be able to pass the same eval-gate a candidate version must. `checkDefaults(gate)` runs every registered default through a supplied per-key gate and reports whether each could go live, without touching the backend:
+
+```ts
+const report = await store.checkDefaults((key, value) => myGate(key, value));
+if (!report.ok) {
+  // report.results is [{ key, passed, failures }]. The policy is yours: fail at boot, warn, or degrade.
+}
+```
+
+The domain packages expose a zero-argument `checkDefaults()` that reuses their own promote-gate, so the check and the promote can never drift. See [SECURITY.md](../../SECURITY.md) for why an unsound default is a real hazard.
+
+## Confidentiality at rest
+
+By default the store keeps a payload's fields as written. For a sensitive-but-not-credential value, set an optional `cipher` (and, to scope it, `encryptedFields`) on the config: the store encrypts those fields after `toDoc` and decrypts them before `fromDoc`, while the content hash and the eval-gate stay over the plaintext, so dedup and promotion are unchanged. A zero-dependency AES-256-GCM cipher is at `@versioned-store/core/cipher`:
+
+```ts
+import { createAesGcmCipher } from "@versioned-store/core/cipher";
+
+const store = createVersionedStore(
+  { ...cfg, cipher: createAesGcmCipher({ key: myKey /* 32-byte Buffer or its base64 */ }), encryptedFields: ["secret"] },
+  backend,
+);
+```
+
+This protects the backend at rest, not a live compromised process, and it is not a secrets manager. See [SECURITY.md](../../SECURITY.md) for the threat model, the migration path (enable, re-publish, rotate), and the one-way-hash caveat.
+
+## Operating a store
+
+[`@versioned-store/cli`](../cli) turns a constructed store into an operator surface: one uniform verb set (`list / add / promote / revert / diff / seed / sync / health`) over one or more store domains, with the promote gated by construction and a `health` verb that runs `checkDefaults` across every domain. It receives an already-constructed store, so it loads no backend driver of its own.
 
 ## Certifying a new backend
 
