@@ -34,6 +34,36 @@ const INSERT_LUA =
   "redis.call('SADD', KEYS[3], ARGV[3]) " +
   "return 1";
 
+/**
+ * Create the Redis backend over an injected client. Redis has no schema, so the adapter hand-maintains the
+ * three structures the contract needs, all namespaced under `prefix`: the version doc itself, a sorted set of
+ * a key's versions (giving `maxVersion` and descending order), and a set of every key holding at least one
+ * version (giving `distinctKeys`).
+ *
+ * Hand-maintained indexes are exactly where a pure-KV adapter goes wrong, so `insertVersion` runs one Lua
+ * script instead of a sequence of commands: it guards on `EXISTS` (a re-insert raises
+ * {@link BackendConflictError}, the core's compare-and-swap signal) and writes the doc plus both indexes
+ * together. A client that dies mid-write therefore cannot leave a version doc that no index knows about.
+ *
+ * @param redis Any client satisfying {@link RedisLike}. It is injected, so the package takes no runtime
+ * dependency on `ioredis` and a node-redis wrapper or an in-process mock works just as well.
+ * @param prefix Namespace for every key this store writes. Give each store its own: two stores sharing a
+ * prefix would share their key set and collide on version docs.
+ *
+ * @example
+ * ```ts
+ * import Redis from "ioredis";
+ * import { createVersionedStore, createRedisBackend } from "@versioned-store/core";
+ *
+ * const store = createVersionedStore<FeatureFlagSet>(
+ *   flagCfg,
+ *   createRedisBackend(new Redis(process.env.REDIS_URL!), "flags"),
+ * );
+ *
+ * const v = await store.addVersion("checkout", nextFlags);
+ * await store.promote("checkout", v, { by: "release-bot" });
+ * ```
+ */
 export function createRedisBackend(redis: RedisLike, prefix: string): VersionedStoreBackend {
   const vKey = (key: string, version: number) => `${prefix}:v:${key}:${version}`;
   const zKey = (key: string) => `${prefix}:zv:${key}`;

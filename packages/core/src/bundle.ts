@@ -10,7 +10,18 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { VersionedStoreBackend } from "./backend.js";
 import { exportBackend, importBundle, type StoreBundle } from "./migrate.js";
 
+/**
+ * A {@link StoreBundle} sealed under a content hash, and optionally signed. Sealing turns a portable export
+ * into a tamper-evident one: any edit to any version or label after sealing changes the recomputed hash, so
+ * `verifyBundle` catches it and `importSealedBundle` refuses the import. With a shared secret, the HMAC adds
+ * provenance on top of integrity (this bundle came from someone holding the secret, not merely from a file
+ * nobody happened to modify).
+ *
+ * The seal covers the FULL version history, not just the current state, which is what makes an exported store
+ * checkable long after it left the machine that produced it.
+ */
 export interface SealedBundle extends StoreBundle {
+  /** Seal format discriminator, independent of the bundle's own `bundleVersion`. Verification refuses any other value. */
   sealedFormat: 1;
   /** sha256 over the canonical (sorted) versions + labels — the tamper-evident seal over the full history. */
   contentHash: string;
@@ -46,6 +57,15 @@ export function sealBundle(bundle: StoreBundle, opts: { secret?: string } = {}):
   return sealed;
 }
 
+/**
+ * The outcome of `verifyBundle`. It is a returned result rather than a thrown error because verification is
+ * usually a decision point (quarantine the file, alert an operator, keep serving the previous bundle) rather
+ * than a crash; `importSealedBundle` is the variant that throws on your behalf.
+ *
+ * `reason` is present only when `valid` is false, and it names which check failed (unknown seal format,
+ * content-hash mismatch, a secret supplied for an unsigned bundle, or a signature mismatch) so the failure is
+ * actionable instead of merely negative.
+ */
 export interface VerifyResult {
   valid: boolean;
   reason?: string;

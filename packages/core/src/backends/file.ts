@@ -21,6 +21,34 @@ function isEnoent(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as { code?: string }).code === "ENOENT";
 }
 
+/**
+ * Create the filesystem backend: one JSON file per immutable version, one per movable label, all under
+ * `rootDir`. Zero dependencies and durable, which is what makes it the right choice when a database would be
+ * overkill (a CLI tool, a single-node service, a checked-in fixture directory) but process-local memory is not
+ * enough.
+ *
+ * Immutability is delegated to the kernel rather than re-implemented: version files are written with the `wx`
+ * flag (`O_CREAT | O_EXCL`), so a second write to an existing `(key, version)` fails `EEXIST` atomically and is
+ * re-thrown as {@link BackendConflictError}, the compare-and-swap signal the core retries on. Because `O_EXCL`
+ * is atomic at the kernel, concurrent writers are safe with no lock file. Keys and labels are base64url-encoded
+ * into their path segment, so any key is filename-safe and no key can escape `rootDir`.
+ *
+ * @param rootDir The directory this backend owns. `init()` creates `versions/` and `labels/` beneath it. Give
+ * it a dedicated path: everything under it is treated as store data.
+ * @returns A backend over that directory. The data outlives the process, so constructing again over the same
+ * `rootDir` re-opens the same store.
+ *
+ * @example
+ * ```ts
+ * import { createVersionedStore, createFileBackend } from "@versioned-store/core";
+ *
+ * const store = createVersionedStore<Prompt>(promptCfg, createFileBackend("./.data/prompts"));
+ * await store.ensureIndexes();                       // creates versions/ and labels/
+ *
+ * const v = await store.addVersion("welcome", draft, { by: "alice" });
+ * await store.promote("welcome", v, { gate, note: "copy review passed" });
+ * ```
+ */
 export function createFileBackend(rootDir: string): VersionedStoreBackend {
   const versionsRoot = join(rootDir, "versions");
   const labelsRoot = join(rootDir, "labels");

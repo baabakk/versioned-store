@@ -22,6 +22,40 @@ function stripId<T>(doc: (T & { _id?: unknown }) | null): T | null {
   return rest as T;
 }
 
+/**
+ * Create the Mongo backend over two collections: immutable version docs in one, movable label pointers in the
+ * other. It is a thin translation of the storage contract into Mongo operations with no change to the on-disk
+ * shape, so an existing pair of collections can be adopted as they stand, with no data migration.
+ *
+ * Immutability rides on the unique `(key, version)` index that `init()` creates: a racing duplicate insert
+ * comes back as E11000 and is re-thrown as {@link BackendConflictError} for the core's retry. Since the index
+ * is what enforces it, `init()` (reachable as `store.ensureIndexes()`) must have run against the database
+ * before concurrent writers are trusted. Mongo's own `_id` is stripped on read, so a returned doc is exactly
+ * the contract shape and matches what the InMemory and SQLite adapters return.
+ *
+ * Import from the `@versioned-store/core/backends/mongo` subpath: the main entry stays free of `mongodb`.
+ *
+ * @param getDb Resolver for a live `Db`. It is a function rather than a `Db` so the host keeps ownership of the
+ * connection lifecycle (lazy connect, reconnect, pooling) and this adapter never opens one. It is called only
+ * when an operation actually runs, and it is assumed to resolve: whether Mongo is configured at all is the
+ * core's decision through the config's `backendAvailable` probe, not this adapter's, which does storage only.
+ * @param versionsCollection Collection holding the immutable version docs.
+ * @param labelsCollection Collection holding the label pointers.
+ *
+ * @example
+ * ```ts
+ * import { createVersionedStore } from "@versioned-store/core";
+ * import { createMongoBackend } from "@versioned-store/core/backends/mongo";
+ * import { getDb, isMongoConfigured } from "./infra.js";
+ *
+ * const store = createVersionedStore<Prompt>(
+ *   { ...promptCfg, backendAvailable: isMongoConfigured }, // serve code defaults when Mongo is absent
+ *   createMongoBackend(getDb, "prompt_versions", "prompt_labels"),
+ * );
+ *
+ * await store.ensureIndexes(); // unique (key,version) + (key,label); run once at boot
+ * ```
+ */
 export function createMongoBackend(getDb: () => Promise<Db>, versionsCollection: string, labelsCollection: string): VersionedStoreBackend {
   const versions = async () => (await getDb()).collection<StoredDoc>(versionsCollection);
   const labels = async () => (await getDb()).collection<LabelDoc>(labelsCollection);

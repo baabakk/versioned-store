@@ -9,6 +9,40 @@ import { BackendConflictError, type LabelDoc, type StoredDoc, type VersionedStor
 
 const clone = <T>(v: T): T => structuredClone(v);
 
+/**
+ * Create the in-memory backend: two nested `Map`s, no I/O, no dependencies. It is the reference implementation
+ * of {@link VersionedStoreBackend}, so it doubles as the shortest complete reading of the storage contract when
+ * you are writing an adapter of your own.
+ *
+ * Docs are deep-copied on the way in and on the way out, which reproduces the fresh-object semantics a real
+ * driver gives on every read: a caller that mutates a returned doc cannot reach back into the store.
+ *
+ * State is process-local and gone on exit. That makes it right for tests, examples, and a backend-less local
+ * run, and wrong for production (use SQLite, File, Postgres, Mongo, or Redis there).
+ *
+ * @returns A fresh, empty backend. One call per isolated store: the conformance suite depends on each factory
+ * call producing an independent instance.
+ *
+ * @example
+ * ```ts
+ * import { createVersionedStore, createInMemoryBackend } from "@versioned-store/core";
+ *
+ * const store = createVersionedStore<{ text: string }>(
+ *   {
+ *     domain: "greeting",
+ *     defaults: { hello: { text: "Hello!" } },
+ *     hash: (v) => v.text,
+ *     toDoc: (v) => ({ text: v.text }),
+ *     fromDoc: (d) => (typeof d.text === "string" ? { text: d.text } : null),
+ *   },
+ *   createInMemoryBackend(),
+ * );
+ *
+ * const v1 = await store.addVersion("hello", { text: "Hi there!" });
+ * await store.promote("hello", v1);
+ * await store.resolve("hello"); // { version: 1, value: { text: "Hi there!" } }
+ * ```
+ */
 export function createInMemoryBackend(): VersionedStoreBackend {
   // key -> (version -> immutable version doc); key -> (label -> movable pointer).
   const versions = new Map<string, Map<number, StoredDoc>>();

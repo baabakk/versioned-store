@@ -10,6 +10,15 @@ export interface Logger {
   warn(obj: unknown, msg?: string): void;
 }
 
+/**
+ * The default logger: every method does nothing. The store stays silent until a host injects its own logger via
+ * `setStoreLogger`, which is the correct default for a library (a dependency that writes to stdout uninvited is
+ * a nuisance) and is what keeps the package free of any logging dependency.
+ *
+ * `child()` returns this same instance, so binding fields onto a noop is still a noop and no allocation
+ * accumulates on a hot path. Export it to satisfy a `Logger` parameter in a test, or to switch logging off
+ * explicitly with `setStoreLogger(noopLogger)`.
+ */
 export const noopLogger: Logger = {
   child: () => noopLogger,
   debug: () => {},

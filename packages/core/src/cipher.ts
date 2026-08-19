@@ -22,6 +22,11 @@ const IV_BYTES = 12; // 96-bit nonce, the AES-GCM standard
 const TAG_BYTES = 16; // 128-bit GCM auth tag
 const KEY_BYTES = 32; // AES-256
 
+/**
+ * Construction options for `createAesGcmCipher`. Both knobs are about key material, because the cryptography
+ * itself is fixed (AES-256-GCM, a fresh 12-byte random IV per encrypt, a 16-byte auth tag): there is no
+ * algorithm, mode, or padding here to get wrong.
+ */
 export interface AesGcmCipherOptions {
   /**
    * The 32-byte AES-256 key. Pass a 32-byte `Buffer`, or its base64 encoding as a string. The host owns key

@@ -25,6 +25,32 @@ const USAGE = `versioned-store <verb> [args]
   migrate <source-backend> <target-backend>
 backend spec: sqlite:<path>  |  file:<dir>   (pg/mongo/redis: use the library API)`;
 
+/**
+ * Resolve a one-string backend spec into a constructed backend. This is the CLI's entire notion of backend
+ * selection, exported because the same compact form is convenient in scripts, fixtures, and tests.
+ *
+ * Exactly two kinds are supported: `sqlite:<path>` (an omitted path means `:memory:`) and `file:<dir>`. Both
+ * are fully described by a string. Postgres, Mongo, and Redis need a live client whose lifecycle the host owns,
+ * so they are constructed through the library API and passed to `migrate()` or `exportBackend()` directly;
+ * naming one here throws with that instruction rather than inventing a connection.
+ *
+ * @param spec `sqlite:<path>`, bare `sqlite` (in-memory), or `file:<dir>`.
+ * @returns An unopened backend. Call `init()` on it (or the store's `ensureIndexes()`) before use.
+ * @throws When the kind is unknown, when it is one of the client-backed kinds, or when `file:` is given with no
+ * directory.
+ *
+ * @example
+ * ```ts
+ * import { backendFromSpec } from "@versioned-store/core/cli";
+ * import { migrate } from "@versioned-store/core";
+ *
+ * // copy a checked-in file store into a fresh SQLite database, verified by content hash
+ * const report = await migrate(backendFromSpec("file:./.data/prompts"), backendFromSpec("sqlite:./prompts.db"));
+ * if (report.hashMismatches.length || report.missingOnTarget.length) {
+ *   throw new Error("migration not verified: do not cut over");
+ * }
+ * ```
+ */
 export function backendFromSpec(spec: string): VersionedStoreBackend {
   const idx = spec.indexOf(":");
   const kind = idx === -1 ? spec : spec.slice(0, idx);

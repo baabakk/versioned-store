@@ -13,7 +13,17 @@
 import { emitStoreEvent, STORE_EVENT_SCHEMA_VERSION } from "./events.js";
 import type { Gate, Resolved, VersionedStore } from "./versionedStore.js";
 
+/**
+ * The label a canary version is pointed at. Canary is an ordinary movable label, not a separate mechanism: the
+ * label model already allowed arbitrary names, which is why weighted rollout needed no new storage concept.
+ * Exported so a caller can read or move the pointer directly, e.g. `store.getActiveVersion(key, CANARY_LABEL)`.
+ */
 export const CANARY_LABEL = "canary";
+
+/**
+ * The label a shadow version is pointed at. A shadow version is resolved for comparison only and never served
+ * to users, so it is where a candidate parks while its output is diffed against the live one.
+ */
 export const SHADOW_LABEL = "shadow";
 
 /** Point the canary label at a version (optionally gated by the deterministic tier before it goes canary). */
@@ -51,6 +61,14 @@ export async function resolveShadow<T>(store: VersionedStore<T>, key: string, op
   };
 }
 
+/**
+ * The report from one `evaluateCanary` pass: which canary version was judged, how the running gate judged it,
+ * and whether that judgement demoted the canary back to the last-known-good version.
+ *
+ * `gatePassed: null` (no canary set, nothing evaluated) is deliberately distinct from `false` (evaluated and
+ * failed), so a controller can sweep every key on a schedule without reading "there is no canary here" as an
+ * incident. `rolledBack` is the field to alarm on.
+ */
 export interface CanaryEvaluation {
   key: string;
   canaryVersion: number | null;
