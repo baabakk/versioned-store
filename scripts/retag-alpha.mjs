@@ -1,3 +1,13 @@
+// The dist-tag this reconciles is DERIVED from the version being published, not hardcoded. It used to be
+// the literal string "alpha", which was correct for the whole alpha line and quietly wrong the moment the
+// first beta shipped: it advanced the `alpha` tag onto a beta, so anyone pinned to `@alpha` would have been
+// handed a beta they never opted into. A prerelease's channel is the identifier in its version, so read it
+// from there and the script keeps working for beta, rc, or anything after.
+function channelOf(version) {
+  const pre = /-([0-9A-Za-z]+)\./.exec(version);
+  return pre ? pre[1] : null;
+}
+
 // Post-publish dist-tag reconciliation for the alpha line.
 //
 // Why this exists: `latest` is the tag npm installs when a user types `npm install @versioned-store/core`
@@ -117,12 +127,12 @@ for (const { name, version } of publishablePackages()) {
     if (read.state === "absent") {
       console.log(`- ${name}: not published yet, nothing to check`);
     } else if (read.state === "unreadable") {
-      console.error(`! ${name}: published, but its dist-tags did not settle within the read budget; cannot verify alpha -> ${version}.`);
+      console.error(`! ${name}: published, but its dist-tags did not settle within the read budget; cannot verify ${channelOf(version) ?? "latest"} -> ${version}.`);
       drift++;
-    } else if (tags.alpha === version) {
-      console.log(`- ${name}: alpha -> ${version} (already correct)`);
+    } else if (tags[channelOf(version) ?? "latest"] === version) {
+      console.log(`- ${name}: ${channelOf(version) ?? "latest"} -> ${version} (already correct)`);
     } else {
-      console.error(`! ${name}: alpha -> ${tags.alpha ?? "(unset)"} but this package is at ${version}`);
+      console.error(`! ${name}: ${channelOf(version) ?? "latest"} -> ${tags[channelOf(version) ?? "latest"] ?? "(unset)"} but this package is at ${version}`);
       drift++;
     }
     continue;
@@ -132,13 +142,13 @@ for (const { name, version } of publishablePackages()) {
   // write only when a FRESH read already shows the tag correct; otherwise attempt it. Setting alpha to the
   // version it already holds is a harmless no-op, so a stale read never causes a wrong action. A true
   // "version not published" is the only way `dist-tag add` fails, and that is handled gracefully.
-  if (read.state === "ok" && tags.alpha === version) {
-    console.log(`- ${name}: alpha -> ${version} (already correct)`);
+  if (read.state === "ok" && tags[channelOf(version) ?? "latest"] === version) {
+    console.log(`- ${name}: ${channelOf(version) ?? "latest"} -> ${version} (already correct)`);
     continue;
   }
   try {
-    npm(["dist-tag", "add", `${name}@${version}`, "alpha"]);
-    const was = read.state === "ok" ? (tags.alpha ?? "unset") : "unread (registry read lagged)";
+    npm(["dist-tag", "add", `${name}@${version}`, channelOf(version) ?? "latest"]);
+    const was = read.state === "ok" ? (tags[channelOf(version) ?? "latest"] ?? "unset") : "unread (registry read lagged)";
     console.log(`+ ${name}: alpha -> ${version} (was ${was})`);
     reconciled++;
   } catch {
