@@ -49,6 +49,51 @@ That is what makes the store safe to put in front of a boot path: a database out
 
 Set `codeDefaultIsFirstClass: true` when serving the in-code default is normal operation for your domain rather than an alarm, which keeps the fallback logs at debug instead of warn.
 
+## Adopting a value changes the lever that controls it
+
+This is the migration consequence most likely to surprise an operator, and it surfaces during an incident,
+which is the worst time to discover it.
+
+Before adoption, an environment variable IS the value: edit it, redeploy, the behaviour changes. After
+adoption the precedence inverts. The store's active version is the value, and the environment variable has
+become the **code default**, which is the fallback served when the key is unseeded or the backend is
+unreachable. So once anything has been promoted for that key:
+
+- Editing the environment variable and redeploying **no longer changes behaviour.** It changes what the
+  system would fall back to, which is not the same thing.
+- Nothing reports an error. The deploy succeeds, the service restarts, and the old value keeps serving. That
+  silence is the hazard: the operator believes the lever was pulled.
+
+The replacement levers are better, but they are different, and an incident runbook that predates the
+migration will still name the old one:
+
+| Intent | Before | After |
+|---|---|---|
+| Change the value now | edit env, redeploy | `promote(key, version)`, no deploy |
+| Return to the shipped default | edit env, redeploy | `revertToCodeDefault(key)` |
+| Change what the fallback is | edit env, redeploy | edit env, redeploy (unchanged) |
+
+**One sharp edge in the second row.** `revertToCodeDefault` re-promotes the in-code default as a new version.
+If that default is captured from the environment at module load, then reverting serves whatever the
+environment said *when the process started*, not what it says now. Changing an environment variable and
+reverting is therefore a two-step recovery: deploy first so the process picks up the new default, then revert.
+Under incident pressure that ordering is easy to get backwards, so write it down in the runbook explicitly, or
+avoid the problem by not deriving code defaults from the environment for values you expect to change during an
+incident.
+
+**Audit the runbook as part of the migration, not after it.** Every documented procedure that says "set X in
+the environment and redeploy" needs rewriting for the keys that moved. The migration is not finished when the
+code resolves from the store; it is finished when the procedures that operate it describe the levers that now
+exist.
+
+**A related decision worth making deliberately.** Moving a value into the store also moves who can change it
+and how it is recorded. An environment variable is changed by a deploy, which is usually access-controlled and
+leaves a trail; a store value is changed by a promote, which is typically an operator surface or a dashboard.
+That is the point for a tuning threshold, and it deserves a second thought for anything security-relevant, such
+as a flag that disables authentication. For those, either keep the value in the environment where the deploy
+gate is the control, or make sure the promote path carries equivalent authorization and lands in the audit
+sink.
+
 ## Placeholder rendering (prompt-store)
 
 `@versioned-store/prompt-store` uses `{{name}}` placeholders with strict binding. The behavior is deliberately unforgiving, because a silently half-rendered prompt is worse than a loud failure.
