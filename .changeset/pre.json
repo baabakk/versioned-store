@@ -1,24 +1,4 @@
 {
   "mode": "pre",
-  "tag": "beta",
-  "initialVersions": {
-    "@versioned-store/cli": "0.0.0",
-    "@versioned-store/core": "0.0.0",
-    "@versioned-store/prompt-store": "0.0.0",
-    "@versioned-store/scaffold-store": "0.0.0"
-  },
-  "changesets": [
-    "check-defaults",
-    "cli-package",
-    "core-promote-note-interface",
-    "drainable-sink",
-    "error-brand-guard",
-    "facades-promote-surface-passthrough",
-    "field-encryption",
-    "initial-alpha",
-    "postgres-table-names",
-    "promote-path-and-fixes",
-    "structural-zod-detection",
-    "verify-on-seed"
-  ]
+  "tag": "beta"
 }
