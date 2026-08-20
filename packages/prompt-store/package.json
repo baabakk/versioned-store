@@ -1,6 +1,6 @@
 {
   "name": "@versioned-store/prompt-store",
-  "version": "0.1.0-alpha.5",
+  "version": "0.1.0-beta.6",
   "description": "A batteries-included, versioned prompt store with a deterministic promote-gate (golden-render + placeholder-binding), built on @versioned-store/core. Version, eval-gate, and roll back your LLM prompts.",
   "type": "module",
   "author": "Babak",
@@ -48,7 +48,7 @@
     "versioned-config"
   ],
   "dependencies": {
-    "@versioned-store/core": "^0.1.0-alpha.5"
+    "@versioned-store/core": "^0.1.0-beta.6"
   },
   "peerDependencies": {
     "zod": "^3.23.0 || ^4.0.0"

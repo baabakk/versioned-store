@@ -1,6 +1,6 @@
 {
   "name": "@versioned-store/cli",
-  "version": "0.1.0-alpha.5",
+  "version": "0.1.0-beta.6",
   "description": "A descriptor-driven operator CLI for @versioned-store: one uniform verb set (list/add/promote/revert/seed/sync/diff/health) over every store domain, with a gated promote and an audit-sink drain, so no consumer hand-rolls an admin surface.",
   "type": "module",
   "author": "Babak",
@@ -47,7 +47,7 @@
     "config-versioning"
   ],
   "dependencies": {
-    "@versioned-store/core": "^0.1.0-alpha.5"
+    "@versioned-store/core": "^0.1.0-beta.6"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
