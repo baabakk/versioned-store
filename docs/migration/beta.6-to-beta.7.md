@@ -10,14 +10,19 @@ This guide exists anyway, because a release that needs no changes is itself usef
 
 ## Upgrade
 
+**Only `@versioned-store/core` moves in this release.** Everything added here lives in the core, so the other three packages stay at `0.1.0-beta.6` and keep working unchanged: each depends on `^0.1.0-beta.6`, which this release satisfies.
+
 ```bash
-npm install @versioned-store/core@0.1.0-beta.7 \
-            @versioned-store/prompt-store@0.1.0-beta.7 \
-            @versioned-store/scaffold-store@0.1.0-beta.7 \
-            @versioned-store/cli@0.1.0-beta.7
+npm install @versioned-store/core@0.1.0-beta.7
 ```
 
-Move the family together and confirm one physical copy afterwards with `npm ls @versioned-store/core`.
+Confirm one physical copy afterwards, because a second copy of the core is what makes an `instanceof` check across a package boundary silently fail:
+
+```bash
+npm ls @versioned-store/core
+```
+
+If you pin the other three exactly, leave them where they are. A release that moves one package is normal here: alpha.1 moved `prompt-store` alone. The version numbers are not kept in lockstep for their own sake.
 
 ## What this release is for
 
