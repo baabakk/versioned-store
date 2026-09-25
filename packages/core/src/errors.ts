@@ -8,7 +8,7 @@
 // even when two copies of this package are loaded (a transitive version split, or a bundler that duplicates
 // it). `instanceof` compares against one copy's class object and returns false across that boundary; a brand
 // keyed on a global symbol does not. This is the same hazard/remedy as the zod `instanceof`-across-copies fix
-// in prompt-store (TD-VS-06): prefer the structural check over identity when the check crosses a package edge.
+// in prompt-store: prefer the structural check over identity when the check crosses a package edge.
 const BRAND = Symbol.for("@versioned-store/core:VersionedStoreError");
 
 /** Base class for every error thrown by the versioned store. Catch this to handle any store failure. */

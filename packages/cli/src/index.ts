@@ -12,7 +12,7 @@
 //   2. `health` runs `checkDefaults` across EVERY registered domain, so a domain with no operator wiring is
 //      visible (it is either registered, and covered, or absent, and there is nothing to operate).
 //   3. The runner owns a connect -> verb -> drain -> close lifecycle, so an async audit sink's writes are
-//      flushed before the backend closes (see createDrainableSink / TD-VS-15).
+//      flushed before the backend closes (see createDrainableSink).
 
 import {
   VersionedStoreError,

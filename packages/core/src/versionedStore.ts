@@ -1,6 +1,7 @@
 import { emitStoreEvent, STORE_EVENT_SCHEMA_VERSION, type StoreEvent, type FallbackReason } from "./events.js";
 import { BackendConflictError, type StoredDoc, type VersionedStoreBackend } from "./backend.js";
 import { storeLog } from "./logger.js";
+import { warnOnce } from "./warnings.js";
 import { CasExhaustedError, GateRejectedError, KillSwitchNotSupportedError, VersionedStoreError, VersionNotFoundError } from "./errors.js";
 
 /** Max optimistic-CAS retries on the version bump before giving up (a hot-loop bound, never hit in practice). */
@@ -59,6 +60,13 @@ export interface DefaultCheck {
 export interface DefaultsHealthReport {
   ok: boolean;
   results: DefaultCheck[];
+  /**
+   * How many code defaults this check examined, which is every key registered in `defaults` at the moment it
+   * ran. Reported so a partial pass cannot read as a full one: a consumer that registers keys lazily (a key
+   * carrying a tenant or user id cannot be in a construction-time map) should compare this against its own
+   * registry, because a report of `ok: true` says nothing about the keys this store has never been told about.
+   */
+  checked: number;
 }
 
 /** One key's outcome from `seedDefaults`. `refused` is set (with `failures`) when a supplied gate rejected the default. */
@@ -280,6 +288,20 @@ export interface VersionedStore<T> {
 export function createVersionedStore<T>(cfg: VersionedStoreConfig<T>, backend: VersionedStoreBackend): VersionedStore<T> {
   const log = storeLog(`store:${cfg.domain}`);
   const DEFAULT_LABEL = cfg.defaultLabel ?? "active";
+
+  // `encryptedFields` names fields for the cipher to encrypt, and the encryption step only runs when a `cipher`
+  // is configured. Naming fields without one is therefore provably inert, and it is the dangerous direction of
+  // that mistake: the consumer believes those values are encrypted at rest and they are stored in plaintext.
+  // The reverse (a cipher with no named fields) is NOT inert and is not warned about, because an absent
+  // `encryptedFields` means every field is encrypted, which is a legitimate configuration.
+  if (cfg.encryptedFields?.length && !cfg.cipher) {
+    warnOnce(
+      "encrypted-fields-without-cipher",
+      `store "${cfg.domain}" names encryptedFields (${cfg.encryptedFields.join(", ")}) but no cipher is ` +
+        `configured, so those fields are stored in PLAINTEXT. Pass a cipher, or drop encryptedFields if the ` +
+        `values are not secret. Silence with suppressWarning("encrypted-fields-without-cipher").`,
+    );
+  }
   // Versions are immutable, so a cached entry can never go stale (effectively infinite TTL, no split-brain).
   const cache = new Map<string, Resolved<T>>();
 
@@ -570,7 +592,7 @@ export function createVersionedStore<T>(cfg: VersionedStoreConfig<T>, backend: V
       const r = await gate(key, value);
       results.push({ key, passed: r.passed, failures: r.failures });
     }
-    return { ok: results.every((r) => r.passed), results };
+    return { ok: results.every((r) => r.passed), results, checked: results.length };
   }
 
   return { resolve, getVersion, getActiveVersion, addVersion, promote, revertToCodeDefault, listVersions, listKeys, ensureIndexes, seedDefaults, syncDefaults, codeDefault, checkDefaults };

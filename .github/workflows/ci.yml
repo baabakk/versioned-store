@@ -205,6 +205,11 @@ jobs:
 
       - run: npm ci
       - run: npm run build
+      - name: No internal references in the built output
+        # The staged-diff scan cannot catch these: the lines are not wrong as source, they are wrong once
+        # the build carries them into the package. One shipped message told public users to run scripts in
+        # a private repository.
+        run: npm run check:dist
 
       - name: Pack each package and assert its declared files exist
         run: |

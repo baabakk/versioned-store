@@ -4,8 +4,9 @@
 //
 // Verbs: keys | versions <key> | get <key> <ver> | label <key> <lbl> | promote <key> <ver> [lbl] |
 //        rollback <key> <ver> [lbl] | export [--out f] | import <bundle.json> | migrate <src> <dst>
-// The domain verbs add / seed / sync need the domain's hash + defaults (not available generically) and are
-// covered by the ADW seed-prompts / seed-scaffolds scripts — see TD-VS-02.
+// The domain verbs add / seed / sync need the domain's hash + defaults, which are not available generically.
+// They belong to a domain-aware runner: see the @versioned-store/cli package, whose descriptors carry each
+// domain's gated promote and defaults.
 
 import { readFile, writeFile } from "node:fs/promises";
 import type { VersionedStoreBackend } from "./backend.js";
@@ -140,7 +141,11 @@ export async function run(argv: string[], nowIso: string): Promise<number> {
     case "seed":
     case "sync":
     case "add":
-      console.error(`"${verb}" is domain-specific (needs the domain's hash/defaults) — use the ADW seed-prompts / seed-scaffolds scripts, or the library API. The generic CLI covers backend-level verbs.`);
+      console.error(
+        `"${verb}" is domain-specific: it needs the domain's hash and defaults, which this generic CLI does ` +
+          `not have. Use the @versioned-store/cli package, which drives a store your application builds, or ` +
+          `call the library API directly. This CLI covers backend-level verbs only.`,
+      );
       return 2;
     default:
       console.error(USAGE);

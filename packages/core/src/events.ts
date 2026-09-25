@@ -109,7 +109,7 @@ export function resetStoreEventCounts(): void {
  * connection the instant the verb returns, and the detached write loses its session. `createDrainableSink`
  * resolves the tension: the sink stays fire-and-forget from the store's point of view (`onEvent` returns void
  * and never throws), but the wrapper tracks each in-flight write, so whoever owns process lifetime can
- * `await drain()` before closing. See `TD-VS-15`.
+ * `await drain()` before closing.
  */
 export interface DrainableSink {
   /** Wire this as the store config's `onEvent`. Returns void, never throws (a sink failure must not break a promote). */

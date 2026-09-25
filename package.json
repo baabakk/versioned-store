@@ -19,7 +19,8 @@
     "release:alpha": "npm run build && npm run typecheck && changeset publish && node scripts/retag-alpha.mjs",
     "release:verify": "node scripts/retag-alpha.mjs --check",
     "docs": "typedoc",
-    "docs:check": "typedoc --emit none"
+    "docs:check": "typedoc --emit none",
+    "check:dist": "node scripts/check-dist-clean.mjs packages/core/dist packages/prompt-store/dist packages/scaffold-store/dist packages/cli/dist"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.1",

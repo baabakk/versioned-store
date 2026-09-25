@@ -15,7 +15,8 @@
     "docs/guide/consuming.md",
     "docs/guide/operating.md",
     "docs/guide/backends.md",
-    "docs/migration/alpha.5-to-beta.6.md"
+    "docs/migration/alpha.5-to-beta.6.md",
+    "docs/migration/beta.6-to-beta.7.md"
   ],
   "includeVersion": true,
   "excludePrivate": true,

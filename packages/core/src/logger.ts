@@ -33,6 +33,14 @@ export function setStoreLogger(logger: Logger): void {
   _root = logger;
 }
 
+/**
+ * Whether a host has injected a logger. Used by the warning channel, which falls back to the console when
+ * nothing would otherwise receive a deprecation: see `warnings.ts` for why that differs from store events.
+ */
+export function hasInjectedLogger(): boolean {
+  return _root !== noopLogger;
+}
+
 /** A logger bound to `{ module }`, resolving the injected root at call time (order-independent). */
 export function storeLog(module: string): Logger {
   return {

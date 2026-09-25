@@ -61,7 +61,9 @@ InMemory, File, and Redis (an injected client) are driver-free and export from t
 
 ## Consuming the store: the rule of one construction site
 
-Wire the store ONCE at a composition root and export a typed façade. Every other file in your app imports from that façade, never from `@versioned-store/core` directly:
+Wire the store ONCE at a composition root and export a typed façade. Every other file in your app imports from that façade, never from `@versioned-store/core` directly.
+
+**One exception, and it is deliberate.** `@versioned-store/core/contract` carries the error classes, the brand guard and the result and gate types, and pulls in no backend, no cipher and no store construction. It is safe to import anywhere, including from a route handler, which is exactly where you need to catch a gate refusal. Re-export from it in your façade so your own callers still never name this package:
 
 ```ts
 // src/config/prompts.ts — the one construction site
@@ -111,8 +113,10 @@ Every backend passes the same conformance suite: the immutability and compare-an
 
 Every error the store throws extends `VersionedStoreError` (subclasses: `VersionNotFoundError`, `GateRejectedError`, `CasExhaustedError`, `BackendConflictError`, `KillSwitchNotSupportedError`), so one blanket `catch` covers the whole library. Prefer the `isVersionedStoreError(e)` guard over `e instanceof VersionedStoreError`:
 
+**Import these from `@versioned-store/core/contract`, not from the main entry.** The façade rule above forbids importing this package outside the construction site, and error handling lives in route handlers and activities, which is everywhere else. The contract entry point exists to resolve that: it is types and errors only. A consumer that followed the façade rule literally and had nowhere to get these from flattened a gate refusal to a string and lost its `failures` list, which is the defect this entry point prevents.
+
 ```ts
-import { isVersionedStoreError } from "@versioned-store/core";
+import { isVersionedStoreError, GateRejectedError } from "@versioned-store/core/contract";
 
 try {
   await store.promote("greeting", 7, { gate });

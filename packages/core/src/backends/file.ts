@@ -1,5 +1,6 @@
-// File VersionedStoreBackend (design 08 M5). A zero-dependency, durable backend over the filesystem — the
-// same shape the ADW truth store uses for immutability. Layout under an injected root dir:
+// File VersionedStoreBackend (design 08 M5). A zero-dependency, durable backend over the filesystem, using
+// write-exclusive file creation so an existing version can never be overwritten. Layout under an injected
+// root dir:
 //   {root}/versions/{enc(key)}/{version}.json   -- one immutable StoredDoc per file
 //   {root}/labels/{enc(key)}/{enc(label)}.json  -- one movable LabelDoc per file
 // Immutability is the OS: a version file is written with the `wx` flag (O_CREAT | O_EXCL), so a re-write of

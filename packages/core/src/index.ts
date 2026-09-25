@@ -15,6 +15,7 @@ export * from "./backend.js";
 export * from "./errors.js";
 export * from "./logger.js";
 export * from "./events.js";
+export * from "./warnings.js";
 export * from "./migrate.js";
 export * from "./bundle.js";
 export * from "./evalGate.js";
