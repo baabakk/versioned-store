@@ -2,10 +2,21 @@
   "$schema": "https://typedoc.org/schema.json",
   "name": "versioned-store",
   "entryPointStrategy": "packages",
-  "entryPoints": ["packages/core", "packages/prompt-store", "packages/scaffold-store", "packages/cli"],
+  "entryPoints": [
+    "packages/core",
+    "packages/prompt-store",
+    "packages/scaffold-store",
+    "packages/cli"
+  ],
   "out": "docs-site",
   "readme": "README.md",
-  "projectDocuments": ["docs/guide/consuming.md", "docs/guide/operating.md", "docs/guide/backends.md"],
+  "projectDocuments": [
+    "docs/status.md",
+    "docs/guide/consuming.md",
+    "docs/guide/operating.md",
+    "docs/guide/backends.md",
+    "docs/migration/alpha.5-to-beta.6.md"
+  ],
   "includeVersion": true,
   "excludePrivate": true,
   "excludeInternal": true,
